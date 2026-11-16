@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -256,7 +257,10 @@ public final class WorkspaceAvailabilityStore {
             out.writeLong(row.serial);
             out.writeUTF(row.packageName);
             out.writeUTF(row.component);
-            out.writeUTF(row.intent);
+            // Launch intents with extras can exceed DataOutputStream.writeUTF's 64-KiB limit while remaining valid Android intents.
+            byte[] intent = row.intent.getBytes(StandardCharsets.UTF_8);
+            out.writeInt(intent.length);
+            out.write(intent);
             out.writeLong(row.modified);
         }
     }
@@ -265,7 +269,7 @@ public final class WorkspaceAvailabilityStore {
         int size = count(in);
         for (int i = 0; i < size; i++) {
             Row row = new Row(in.readUTF(), in.readInt(), in.readLong(), in.readUTF(),
-                    in.readUTF(), in.readUTF(), in.readLong());
+                    in.readUTF(), readIntent(in), in.readLong());
             rows.put(removal ? row.fingerprint() : row.identity(), row);
         }
     }
@@ -274,6 +278,14 @@ public final class WorkspaceAvailabilityStore {
         int count = in.readInt();
         if (count < 0 || count > MAX_RECORDS) throw new IOException("Invalid record count");
         return count;
+    }
+
+    private static String readIntent(DataInputStream in) throws IOException {
+        int length = in.readInt();
+        if (length < 0 || length > in.available()) throw new IOException("Invalid intent length");
+        byte[] intent = new byte[length];
+        in.readFully(intent);
+        return new String(intent, StandardCharsets.UTF_8);
     }
 
     private static void writeNullable(DataOutputStream out, String value) throws IOException {

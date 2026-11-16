@@ -117,21 +117,31 @@ public class ModelDbController {
         createDbIfNotExists();
         SQLiteDatabase db = mOpenHelper.getWritableDatabase();
         try {
+            if (tableExists(db, "workspace_availability_identity")) {
+                String existing = readWorkspaceIdentity(db);
+                if (existing != null) return existing;
+            }
             db.execSQL(CREATE_AVAILABILITY_IDENTITY);
             db.execSQL("INSERT OR IGNORE INTO workspace_availability_identity(singleton, token) VALUES(1, ?)",
                     new Object[] {java.util.UUID.randomUUID().toString()});
-            try (Cursor cursor = db.rawQuery("SELECT token FROM workspace_availability_identity WHERE singleton=1", null)) {
-                if (cursor.moveToFirst()) {
-                    String token = cursor.getString(0);
-                    if (token != null && java.util.UUID.fromString(token).toString().equals(token)) {
-                        return mOpenHelper.getDatabaseName() + ":" + token;
-                    }
-                }
-            }
+            String created = readWorkspaceIdentity(db);
+            if (created != null) return created;
         } catch (android.database.sqlite.SQLiteException | IllegalArgumentException e) {
             Log.e(TAG, "Availability identity unreadable; using unknown history without resetting favorites", e);
         }
         return mUnverifiedWorkspaceIdentity;
+    }
+
+    private String readWorkspaceIdentity(SQLiteDatabase db) {
+        try (Cursor cursor = db.rawQuery("SELECT token FROM workspace_availability_identity WHERE singleton=1", null)) {
+            if (cursor.moveToFirst()) {
+                String token = cursor.getString(0);
+                if (token != null && java.util.UUID.fromString(token).toString().equals(token)) {
+                    return mOpenHelper.getDatabaseName() + ":" + token;
+                }
+            }
+        }
+        return null;
     }
 
     /** A new/restored layout must not inherit another installation's pending deletes or device-specific storage associations. */

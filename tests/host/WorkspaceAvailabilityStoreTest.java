@@ -27,6 +27,7 @@ public final class WorkspaceAvailabilityStoreTest {
         storageMappingIsNotInvented();
         availabilityEventIsDurableWithoutKnownPackage();
         uninstallRetiresRecoveryForPreviouslyDeletedRows();
+        longIntentUninstallSurvivesRestart();
         System.out.println("PASS " + count + " production availability policy/store tests");
     }
 
@@ -207,6 +208,19 @@ public final class WorkspaceAvailabilityStoreTest {
         store.uninstall(10, "pkg", Collections.emptyList());
         store = new WorkspaceAvailabilityStore(disk);
         check(!store.isRecovering(10, "pkg"), "Confirmed uninstall must retire recovery even for rows already removed by the user");
+        count++;
+    }
+
+    private static void longIntentUninstallSurvivesRestart() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        store.observe(10, "pkg", false, null, null);
+        WorkspaceAvailabilityStore.Row row = new WorkspaceAvailabilityStore.Row("db", 1, 10,
+                "pkg", "Main", "intent-extra=" + "x".repeat(70000), 100);
+        store.uninstall(10, "pkg", Collections.singletonList(row));
+        store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(row, true));
+        equal(1, store.removals().size());
         count++;
     }
 

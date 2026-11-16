@@ -45,3 +45,12 @@ Plan: `C:/git/android-launchers-shortcuts-fix/docs/superpowers/plans/2026-11-16-
 - JDK compiler parser checked 18 changed/new Java files with zero syntax errors; this is syntax-only, not Android type checking. `javap` against the repository's Android-10 framework prebuilt confirms `ApplicationInfo.storageUuid`, `StorageManager.UUID_DEFAULT/getStorageVolumes`, `StorageVolume.getUuid/getState`, and AtomicFile methods used here; no newer storage callback APIs were introduced.
 - Ruling: add a focused Gradle `androidTest` source set rather than claim the repository's unwired Soong tests run under Gradle — this makes the new integration regressions runnable on the actual Lawnchair variant, at the cost of AndroidX test-runner dependencies and a test APK.
 - Ruling: do not run an expensive Android build or use an emulator in this worker — coordinator explicitly owns RAM scheduling and device restrictions. Build, APK manifest, Android test results, race scheduling, and the affected Lenovo's storage behavior remain validation gates.
+
+## Author final hazard review
+
+- Coordinator owns the independent review; no nested reviewer was spawned. Author checks are not an independent approval.
+- Found and reproduced long-intent tombstone serialization failure: `longIntentUninstallSurvivesRestart` RED `Expected 0, got 2` because `writeUTF` rejected a 70,000-character extra. Changed row-intent encoding to length-prefixed UTF-8 with bounded input reads. GREEN: all 18 host tests pass.
+- Avoided repeated identity-table writes on every model task by reading an existing valid identity before the idempotent create/insert path. Invalid UUID metadata falls back to unknown history and cannot form a journal path.
+- Deferred minor: the new explanatory string is English-only and uses Android's standard fallback until translations are supplied.
+- Unresolved release gates and missed-uninstall ambiguity are exhaustively listed in `docs/shortcut-reliability-report.md`; no APK, Android compile, device, integration-test, full-suite, or independent-review success is claimed.
+- Final fresh checks: 18/18 host tests, 19/19 base-to-working-tree Java files parsed without syntax diagnostics (not type checked), 2/2 XML documents parsed, and `git diff --check` passed.
