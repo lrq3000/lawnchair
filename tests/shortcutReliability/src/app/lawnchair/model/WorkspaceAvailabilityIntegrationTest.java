@@ -30,6 +30,7 @@ import com.android.launcher3.model.ModelDbController;
 import com.android.launcher3.model.SdCardAvailableReceiver;
 import com.android.launcher3.model.UserManagerState;
 import com.android.launcher3.model.WorkspaceItemProcessor;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.pm.UserCache;
 import com.android.launcher3.util.ContentWriter;
@@ -142,9 +143,11 @@ public class WorkspaceAvailabilityIntegrationTest {
     @Test
     public void missingFolderAndDockChildren_remainInTheirContainers() throws Exception {
         MODEL_EXECUTOR.submit(() -> {
+            insertFolder(88);
             insert(74, missingIntent(), 88, 0, 7, mSerial);
             insert(75, missingIntent(), Favorites.CONTAINER_HOTSEAT, 1, 1, mSerial);
             BgDataModel model = new BgDataModel();
+            loadItem(88, model);
             WorkspaceItemInfo folderChild = load(74, model);
             WorkspaceItemInfo dockChild = load(75, model);
             assertNotNull(folderChild);
@@ -154,6 +157,49 @@ public class WorkspaceAvailabilityIntegrationTest {
             assertTrue(model.collections.get(88).getContents().contains(folderChild));
             assertEquals(Favorites.CONTAINER_HOTSEAT, dockChild.container);
         }).get();
+    }
+
+    @Test
+    public void evictedLowResFolderChild_asyncHighResRequestUsesSavedCustomImageAndBindsFolderPage() throws Exception {
+        BgDataModel model = new BgDataModel();
+        WorkspaceItemInfo child = MODEL_EXECUTOR.submit(() -> {
+            insertFolder(88);
+            insert(74, missingIntent(), 88, 0, 7, mSerial);
+            loadItem(88, model);
+            WorkspaceItemInfo item = load(74, model);
+            item.bitmap = com.android.launcher3.icons.BitmapInfo.LOW_RES_INFO;
+            item.title = "stale low-res label";
+            mApp.getIconCache().removeIconsForPkg("missing.external.app", item.user);
+            return item;
+        }).get();
+        CompletableFuture<com.android.launcher3.model.data.ItemInfoWithIcon> rebound = new CompletableFuture<>();
+        MAIN_EXECUTOR.submit(() -> mApp.getIconCache().updateIconInBackground(rebound::complete, child)).get();
+        assertSame(child, rebound.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        assertFalse(child.bitmap.isNullOrLowRes());
+        assertEquals("Saved custom label", child.title.toString());
+        assertEquals(Color.RED, child.bitmap.icon.getPixel(child.bitmap.icon.getWidth() / 2, child.bitmap.icon.getHeight() / 2));
+        java.util.Set<Integer> boundIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        java.util.Set<Integer> boundPages = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        BgDataModel.Callbacks callbacks = new BgDataModel.Callbacks() {
+            @Override public com.android.launcher3.util.IntSet getPagesToBindSynchronously(com.android.launcher3.util.IntArray pages) {
+                com.android.launcher3.util.IntSet result = new com.android.launcher3.util.IntSet();
+                result.add(7);
+                return result;
+            }
+            @Override public void bindItems(java.util.List<ItemInfo> items, boolean animate) {
+                for (ItemInfo item : items) boundIds.add(item.id);
+            }
+            @Override public void bindScreens(com.android.launcher3.util.IntArray screens) {
+                for (int i = 0; i < screens.size(); i++) boundPages.add(screens.get(i));
+            }
+        };
+        MODEL_EXECUTOR.submit(() -> new com.android.launcher3.model.BaseLauncherBinder(mApp, model,
+                new com.android.launcher3.model.AllAppsList(mApp.getIconCache(), new com.android.launcher3.AppFilter(mContext)),
+                new BgDataModel.Callbacks[] {callbacks}).bindWorkspace(true, false)).get();
+        MAIN_EXECUTOR.submit(() -> { }).get();
+        assertTrue(boundIds.contains(88));
+        assertTrue(boundPages.contains(7));
+        assertTrue(model.collections.get(88).getContents().contains(child));
     }
 
     @Test
@@ -296,6 +342,10 @@ public class WorkspaceAvailabilityIntegrationTest {
     }
 
     private WorkspaceItemInfo load(int id, BgDataModel model) {
+        return (WorkspaceItemInfo) loadItem(id, model);
+    }
+
+    private ItemInfo loadItem(int id, BgDataModel model) {
         UserManagerState users = new UserManagerState();
         users.allUsers.put(mSerial, Process.myUserHandle());
         try (LoaderCursor c = new LoaderCursor(mDb.query(Favorites.TABLE_NAME, null,
@@ -308,7 +358,20 @@ public class WorkspaceAvailabilityIntegrationTest {
                     new WidgetInflater(mContext), PackageManagerHelper.INSTANCE.get(mContext),
                     new ArrayList<>(), new LongSparseArray<>(), new ArrayList<>()).processItem();
         }
-        return (WorkspaceItemInfo) model.itemsIdMap.get(id);
+        return model.itemsIdMap.get(id);
+    }
+
+    private void insertFolder(int id) {
+        ContentValues row = new ContentValues();
+        row.put(Favorites._ID, id);
+        row.put(Favorites.ITEM_TYPE, Favorites.ITEM_TYPE_FOLDER);
+        row.put(Favorites.PROFILE_ID, mSerial);
+        row.put(Favorites.CONTAINER, Favorites.CONTAINER_DESKTOP);
+        row.put(Favorites.SCREEN, 7);
+        row.put(Favorites.CELLX, 1);
+        row.put(Favorites.CELLY, 2);
+        row.put(Favorites.TITLE, "Persisted folder");
+        assertTrue(mDb.insert(Favorites.TABLE_NAME, row) >= 0);
     }
 
     private void insert(int id, Intent intent, int container, int screen, int rank, long serial) {

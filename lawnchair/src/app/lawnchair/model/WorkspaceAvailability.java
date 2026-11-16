@@ -24,6 +24,7 @@ import com.android.launcher3.model.LoaderCursor;
 import com.android.launcher3.model.ModelDbController;
 import com.android.launcher3.model.PackageUpdatedTask;
 import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.IconRequestInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.pm.UserCache;
 import com.android.launcher3.util.ContentWriter;
@@ -242,7 +243,7 @@ public final class WorkspaceAvailability {
                 int decision = evaluate(item);
                 if (decision == WorkspaceAvailabilityStore.KEEP) {
                     if (!isUnavailable(item)) changed.add(item);
-                    item.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                    markUnavailable(item);
                 } else if (decision == WorkspaceAvailabilityStore.AVAILABLE) {
                     if (isUnavailable(item)) {
                         item.runtimeStatusFlags &= ~WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
@@ -260,6 +261,32 @@ public final class WorkspaceAvailability {
             if (isOrdinaryApplication(info) && isUnavailable((WorkspaceItemInfo) info)) return true;
         }
         return false;
+    }
+
+    public void markUnavailable(WorkspaceItemInfo item) {
+        boolean hydrate = !isUnavailable(item) || item.bitmap == null || item.bitmap.isNullOrLowRes();
+        item.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+        if (hydrate) restoreUnavailableAppearance(item);
+    }
+
+    /** Model thread only: the durable favorites snapshot is authoritative when an asynchronous folder request cannot read its APK. */
+    public void restoreUnavailableAppearance(WorkspaceItemInfo item) {
+        try (Cursor c = mDb.query(Favorites.TABLE_NAME, new String[] {Favorites.TITLE, Favorites.ICON},
+                Favorites._ID + "=? AND " + Favorites.PROFILE_ID + "=? AND " + Favorites.INTENT + "=?",
+                new String[] {Integer.toString(item.id), Long.toString(UserCache.INSTANCE.get(mContext)
+                        .getSerialNumberForUser(item.user)), item.intent.toUri(0)}, null)) {
+            if (!c.moveToFirst()) return;
+            String title = c.getString(0);
+            WorkspaceItemInfo saved = new WorkspaceItemInfo(item);
+            byte[] blob = c.getBlob(1);
+            if (blob != null && new IconRequestInfo<>(saved, null, blob, false).loadWorkspaceIcon(mContext)
+                    && saved.bitmap != null && !saved.bitmap.isNullOrLowRes()
+                    && !mApp.getIconCache().isDefaultIcon(saved.bitmap, item.user)) item.bitmap = saved.bitmap;
+            if (!TextUtils.isEmpty(title)) item.title = title;
+            item.contentDescription = mContext.getPackageManager().getUserBadgedLabel(item.title, item.user);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Saved appearance unavailable; retaining the displayed image", e);
+        }
     }
 
     public boolean hasWorkspaceApplication(String pkg, UserHandle user) {

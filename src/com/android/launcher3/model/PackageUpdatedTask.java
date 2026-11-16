@@ -277,7 +277,7 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                         if (WorkspaceAvailability.isOrdinaryApplication(si)) {
                             if (mOp == OP_REMOVE) return; // Fingerprinted old favorites were journaled/deleted before this task; never broadly delete a new installation.
                             if (mOp == OP_UNAVAILABLE) {
-                                si.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                                availability.markUnavailable(si);
                                 forceKeepShortcuts.add(si.id);
                                 updatedWorkspaceItems.add(si);
                                 return;
@@ -285,7 +285,7 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                             if (isNewApkAvailable) {
                                 int decision = availability.evaluate(si);
                                 if (decision == WorkspaceAvailabilityStore.KEEP) {
-                                    si.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                                    availability.markUnavailable(si);
                                     forceKeepShortcuts.add(si.id);
                                     updatedWorkspaceItems.add(si);
                                     return;
