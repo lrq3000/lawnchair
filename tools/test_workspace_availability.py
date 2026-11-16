@@ -12,7 +12,13 @@ OUTPUT.mkdir(parents=True, exist_ok=True)
 subprocess.run([
     str(JAVA / "javac"), "-Xlint:all", "-d", str(OUTPUT),
     str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceAvailabilityStore.java"),
+    str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceTargetState.java"),
     str(ROOT / "tests/host/WorkspaceAvailabilityStoreTest.java"),
+    str(ROOT / "tests/host/WorkspaceTargetStateTest.java"),
+], check=True)
+subprocess.run([
+    str(JAVA / "java"), "-ea", "-cp", str(OUTPUT),
+    "app.lawnchair.model.WorkspaceTargetStateTest",
 ], check=True)
 subprocess.run([
     str(JAVA / "java"), "-ea", "-cp", str(OUTPUT),

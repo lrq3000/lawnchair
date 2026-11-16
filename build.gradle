@@ -366,6 +366,7 @@ addFrameworkJar('framework-15.jar')
 dependencies {
     androidTestImplementation libs.androidx.junit
     androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'org.mockito:mockito-android:5.2.0'
     implementation projects.iconloaderlib
     implementation projects.searchuilib
     implementation projects.animationlib

@@ -27,6 +27,7 @@ import android.text.TextUtils
 import android.util.Log
 import android.util.LongSparseArray
 import app.lawnchair.model.WorkspaceAvailabilityStore
+import app.lawnchair.model.WorkspaceTargetState
 import com.android.launcher3.Flags
 import com.android.launcher3.InvariantDeviceProfile
 import com.android.launcher3.LauncherAppState
@@ -156,23 +157,25 @@ class WorkspaceItemProcessor(
         }
         val archivedApplication = Utilities.ATLEAST_V && Flags.enableSupportForArchiving() && pmHelper.isAppArchivedForUser(targetPkg, c.user)
         val ordinaryApplication = c.itemType == Favorites.ITEM_TYPE_APPLICATION && c.restoreFlag == 0 && cn != null && !archivedApplication
-        if (ordinaryApplication && app.model.workspaceAvailability.evaluate(c, intent) == WorkspaceAvailabilityStore.KEEP) {
-            // Missing package information is not uninstall evidence. Occupy the original cell/folder slot and retain the exact saved intent.
-            allowMissingTarget = true
-            disabledState = disabledState or WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE
-            pendingPackages.add(PackageUserKey(targetPkg, c.user))
-        }
-        var validTarget = !allowMissingTarget && launcherApps.isPackageEnabled(targetPkg, c.user)
+        val originalIntent = intent
+        val observation = if (ordinaryApplication) WorkspaceTargetState(
+            app.model.workspaceAvailability.evaluate(c, originalIntent)
+        ) { app.model.workspaceAvailability.preserve(c, originalIntent) } else null
+        allowMissingTarget = observation?.decision == WorkspaceAvailabilityStore.KEEP
+        var validTarget = !allowMissingTarget && (observation?.recheck {
+            launcherApps.isPackageEnabled(targetPkg, c.user)
+        } ?: launcherApps.isPackageEnabled(targetPkg, c.user))
 
         // If it's a deep shortcut, we'll use pinned shortcuts to restore it
         if (cn != null && validTarget && !allowMissingTarget && (c.itemType != Favorites.ITEM_TYPE_DEEP_SHORTCUT)) {
             // If the apk is present and the shortcut points to a specific component.
 
             // If the component is already present
-            if (launcherApps.isActivityEnabled(cn, c.user)) {
+            if (observation?.recheck { launcherApps.isActivityEnabled(cn, c.user) }
+                    ?: launcherApps.isActivityEnabled(cn, c.user)) {
                 // no special handling necessary for this item
                 c.markRestored()
-            } else {
+            } else if (observation?.decision != WorkspaceAvailabilityStore.KEEP) {
                 // Gracefully try to find a fallback activity.
                 FileLog.d(
                     TAG,
@@ -192,6 +195,12 @@ class WorkspaceItemProcessor(
                     return
                 }
             }
+        }
+        if (observation?.decision == WorkspaceAvailabilityStore.KEEP) {
+            allowMissingTarget = true
+            validTarget = false
+            disabledState = disabledState or WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE
+            pendingPackages.add(PackageUserKey(targetPkg, c.user))
         }
         if (!ordinaryApplication && intent.`package` == null) {
             intent.`package` = targetPkg
@@ -273,6 +282,19 @@ class WorkspaceItemProcessor(
                 info = c.getRestoredItemInfo(intent)
             }
             ordinaryApplication && allowMissingTarget -> info = c.loadSimpleWorkspaceItem()
+            ordinaryApplication && observation?.decision != WorkspaceAvailabilityStore.REMOVE -> {
+                val resolved = c.getAppShortcutInfo(intent, true, useLowResIcon, false)
+                if (c.launcherActivityInfo == null) {
+                    // Resolution can change again inside LoaderCursor; retain the row instead of dropping it from the model.
+                    observation?.unresolved()
+                    allowMissingTarget = true
+                    disabledState = disabledState or WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE
+                    pendingPackages.add(PackageUserKey(targetPkg, c.user))
+                    info = c.loadSimpleWorkspaceItem()
+                } else {
+                    info = resolved
+                }
+            }
             c.itemType == Favorites.ITEM_TYPE_APPLICATION ->
                 info = c.getAppShortcutInfo(intent, allowMissingTarget, useLowResIcon, false)
             c.itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT -> {

@@ -103,6 +103,13 @@ public final class WorkspaceAvailability {
         return store().evaluate(row, activity != null);
     }
 
+    /** Positive and negative lookups in the same load disagreed; record recovery before any fallback/delete can run. */
+    public void preserve(LoaderCursor cursor, Intent original) {
+        WorkspaceAvailabilityStore.Row row = row(cursor, original);
+        store().unavailable(row.serial, row.packageName);
+        store().evaluate(row, false);
+    }
+
     public int evaluate(WorkspaceItemInfo item) {
         WorkspaceAvailabilityStore.Row row = findRow(item);
         if (row == null) return WorkspaceAvailabilityStore.REMOVE;

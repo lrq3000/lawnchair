@@ -105,6 +105,41 @@ public class WorkspaceAvailabilityIntegrationTest {
     }
 
     @Test
+    public void packageDisappearsBetweenPositiveResolutionAndProcessorCheck_preservesOriginal() throws Exception {
+        assertProcessorLookupRace(false);
+    }
+
+    @Test
+    public void activityDisappearsBetweenPositiveResolutionAndFallbackCheck_preservesOriginal() throws Exception {
+        assertProcessorLookupRace(true);
+    }
+
+    private void assertProcessorLookupRace(boolean activityRace) throws Exception {
+        LauncherApps apps = org.mockito.Mockito.spy(mContext.getSystemService(LauncherApps.class));
+        String pkg = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
+        ComponentName component = new ComponentName(pkg, TargetActivity.class.getName());
+        if (activityRace) {
+            org.mockito.Mockito.doReturn(true, false).when(apps).isActivityEnabled(component, Process.myUserHandle());
+        } else {
+            org.mockito.Mockito.doReturn(true, false).when(apps).isPackageEnabled(pkg, Process.myUserHandle());
+        }
+        mContext.mServices.put(mContext.getSystemServiceName(LauncherApps.class), apps);
+        MODEL_EXECUTOR.submit(() -> {
+            Intent original = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setComponent(component).putExtra("original-extra", "must-survive-fallback");
+            insert(86, original, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            WorkspaceItemInfo item = load(86, new BgDataModel());
+            assertNotNull(item);
+            assertEquals(original.toUri(0), item.intent.toUri(0));
+            assertTrue(WorkspaceAvailability.isUnavailable(item));
+            try (Cursor c = mDb.query(Favorites.TABLE_NAME, null, Favorites._ID + "=86", null, null)) {
+                assertTrue(c.moveToFirst());
+                assertEquals(original.toUri(0), c.getString(c.getColumnIndexOrThrow(Favorites.INTENT)));
+            }
+        }).get();
+    }
+
+    @Test
     public void missingFolderAndDockChildren_remainInTheirContainers() throws Exception {
         MODEL_EXECUTOR.submit(() -> {
             insert(74, missingIntent(), 88, 0, 7, mSerial);
@@ -302,6 +337,7 @@ public class WorkspaceAvailabilityIntegrationTest {
     }
 
     private static final class TestContext extends SandboxContext {
+        private final java.util.Map<String, Object> mServices = new java.util.HashMap<>();
         private final File mJournalDirectory;
         private final String mPreferencesPrefix = "shortcut-reliability-" + UUID.randomUUID() + "-";
 
@@ -319,6 +355,11 @@ public class WorkspaceAvailabilityIntegrationTest {
         @Override
         public SharedPreferences getSharedPreferences(String name, int mode) {
             return super.getSharedPreferences(mPreferencesPrefix + name, mode);
+        }
+
+        @Override
+        public Object getSystemService(String name) {
+            return mServices.containsKey(name) ? mServices.get(name) : super.getSystemService(name);
         }
 
         @Override
