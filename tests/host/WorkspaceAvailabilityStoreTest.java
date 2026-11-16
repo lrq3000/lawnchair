@@ -32,6 +32,9 @@ public final class WorkspaceAvailabilityStoreTest {
         unchangedObservationRetriesTransientWriteFailure();
         dirtyInternalHistoryCannotAuthorizeDeletion();
         delayedUninstallCannotMatchReusedIdEvenWithIdenticalTimestamp();
+        unknownIncarnationCannotAuthorizeDestructiveReplay();
+        versionOneRecoveryRemainsProtected();
+        versionOneRemovalDoesNotMatchNewIncarnation();
         System.out.println("PASS " + count + " production availability policy/store tests");
     }
 
@@ -279,6 +282,71 @@ public final class WorkspaceAvailabilityStoreTest {
         equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(fresh, true));
         equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(old, true));
         count++;
+    }
+
+    private static void unknownIncarnationCannotAuthorizeDestructiveReplay() {
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(new Disk());
+        WorkspaceAvailabilityStore.Row unknown = new WorkspaceAvailabilityStore.Row("db", 1, 10,
+                "pkg", "Main", "original-intent", 100, "");
+        store.observe(10, "pkg", false, "internal", null);
+        store.uninstall(10, "pkg", Collections.singletonList(unknown));
+        equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(unknown, true));
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(unknown, false));
+        WorkspaceAvailabilityStore internal = new WorkspaceAvailabilityStore(new Disk());
+        internal.observe(10, "pkg", false, "internal", null);
+        equal(WorkspaceAvailabilityStore.KEEP, internal.evaluate(unknown, false));
+        count++;
+    }
+
+    private static void versionOneRecoveryRemainsProtected() throws Exception {
+        Disk disk = new Disk();
+        disk.bytes = versionOneFixture(false);
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        count++;
+    }
+
+    private static void versionOneRemovalDoesNotMatchNewIncarnation() throws Exception {
+        Disk disk = new Disk();
+        disk.bytes = versionOneFixture(true);
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        equal(1, store.removals().size());
+        equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(row(1, 10, "Main"), true));
+        count++;
+    }
+
+    /** Literal old schema fixture, independent of the production encoder, to exercise the actual migration reader. */
+    private static byte[] versionOneFixture(boolean removal) throws Exception {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream out = new java.io.DataOutputStream(bytes);
+        out.writeInt(0x4c435741);
+        out.writeInt(1);
+        out.writeInt(1);
+        out.writeUTF("10:pkg");
+        out.writeBoolean(true);
+        out.writeBoolean(false);
+        out.writeBoolean(false);
+        out.writeBoolean(false);
+        out.writeBoolean(false);
+        out.writeLong(1);
+        out.writeInt(removal ? 0 : 1);
+        if (removal) out.writeInt(1);
+        out.writeUTF("db");
+        out.writeInt(1);
+        out.writeLong(10);
+        out.writeUTF("pkg");
+        out.writeUTF("Main");
+        byte[] intent = "original-intent".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        out.writeInt(intent.length);
+        out.write(intent);
+        out.writeLong(100);
+        if (!removal) out.writeInt(0);
+        out.flush();
+        java.util.zip.CRC32 checksum = new java.util.zip.CRC32();
+        checksum.update(bytes.toByteArray());
+        out.writeLong(checksum.getValue());
+        out.flush();
+        return bytes.toByteArray();
     }
 
     private static WorkspaceAvailabilityStore.Row row(int id, long serial, String component) {

@@ -90,7 +90,7 @@ public final class WorkspaceAvailabilityStore {
     /** Only a positive resolution of THIS saved component ends recovery; volume state and time are not inputs. */
     public int evaluate(Row row, boolean exactTargetResolves) {
         retryPendingWrites();
-        if (mRemovals.containsKey(row.fingerprint())) return REMOVE;
+        if (!row.incarnation.isEmpty() && mRemovals.containsKey(row.fingerprint())) return REMOVE;
         String key = packageKey(row.serial, row.packageName);
         PackageState state = mPackages.get(key);
         if (exactTargetResolves) {
@@ -102,7 +102,7 @@ public final class WorkspaceAvailabilityStore {
             }
             return AVAILABLE;
         }
-        if (!mWriteFailed && state != null && state.known && !state.external && !state.recovering
+        if (!row.incarnation.isEmpty() && !mWriteFailed && state != null && state.known && !state.external && !state.recovering
                 && !mRecovering.containsKey(row.identity())) return REMOVE;
         if (!mRecovering.containsKey(row.identity())) {
             mRecovering.put(row.identity(), row);
