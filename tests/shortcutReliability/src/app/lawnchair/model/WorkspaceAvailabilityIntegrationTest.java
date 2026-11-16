@@ -327,6 +327,53 @@ public class WorkspaceAvailabilityIntegrationTest {
     }
 
     @Test
+    public void healthyOrdinaryUpdate_reconcilesProgressResizeAndArchiveWithoutReplacingIdentity() throws Exception {
+        String pkg = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
+        ComponentName component = new ComponentName(pkg, TargetActivity.class.getName());
+        Intent original = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(component).putExtra("unchanged", "saved-intent");
+        MODEL_EXECUTOR.submit(() -> {
+            insert(87, original, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            mDb.clearEmptyDbFlag();
+        }).get();
+        BgDataModel.Callbacks callbacks = new BgDataModel.Callbacks() { };
+        MAIN_EXECUTOR.submit(() -> mApp.getModel().addCallbacksAndLoad(callbacks)).get();
+        MODEL_EXECUTOR.submit(() -> { }).get();
+        CompletableFuture<BgDataModel> loaded = new CompletableFuture<>();
+        mApp.getModel().enqueueModelUpdateTask((controller, data, apps) -> loaded.complete(data));
+        BgDataModel model = loaded.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        WorkspaceItemInfo item = (WorkspaceItemInfo) model.itemsIdMap.get(87);
+        assertNotNull(item);
+        LauncherApps apps = org.mockito.Mockito.spy(mContext.getSystemService(LauncherApps.class));
+        android.content.pm.LauncherActivityInfo activity = org.mockito.Mockito.spy(apps.resolveActivity(original, item.user));
+        if (com.android.launcher3.Utilities.ATLEAST_S) org.mockito.Mockito.doReturn(0.73f).when(activity).getLoadingProgress();
+        if (com.android.launcher3.Utilities.ATLEAST_V) {
+            android.content.pm.ActivityInfo changed = new android.content.pm.ActivityInfo(activity.getActivityInfo());
+            changed.isArchived = true;
+            org.mockito.Mockito.doReturn(changed).when(activity).getActivityInfo();
+        }
+        org.mockito.Mockito.doReturn(java.util.Collections.singletonList(activity)).when(apps).getActivityList(pkg, item.user);
+        org.mockito.Mockito.doReturn(activity).when(apps).resolveActivity(org.mockito.ArgumentMatchers.any(Intent.class), org.mockito.ArgumentMatchers.eq(item.user));
+        mContext.mServices.put(mContext.getSystemServiceName(LauncherApps.class), apps);
+        com.android.launcher3.util.ApiWrapper wrapper = org.mockito.Mockito.mock(com.android.launcher3.util.ApiWrapper.class);
+        org.mockito.Mockito.when(wrapper.isNonResizeableActivity(activity)).thenReturn(true);
+        mContext.putObject(com.android.launcher3.util.ApiWrapper.INSTANCE, wrapper);
+        MODEL_EXECUTOR.submit(() -> item.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_QUIET_USER
+                | WorkspaceItemInfo.FLAG_DISABLED_SUSPENDED).get();
+        mApp.getModel().newModelCallbacks().onPackageChanged(pkg, item.user);
+        MODEL_EXECUTOR.submit(() -> {
+            assertSame(item, model.itemsIdMap.get(87));
+            assertEquals(original.toUri(0), item.intent.toUri(0));
+            assertTrue(item.isNonResizeable());
+            assertEquals(com.android.launcher3.Utilities.ATLEAST_S ? 73 : 100, item.getProgressLevel());
+            if (com.android.launcher3.Utilities.ATLEAST_V && com.android.launcher3.Flags.enableSupportForArchiving()) assertTrue(item.isArchived());
+            assertTrue((item.runtimeStatusFlags & WorkspaceItemInfo.FLAG_DISABLED_QUIET_USER) != 0);
+            assertTrue((item.runtimeStatusFlags & WorkspaceItemInfo.FLAG_DISABLED_SUSPENDED) != 0);
+        }).get();
+        MAIN_EXECUTOR.submit(() -> mApp.getModel().removeCallbacks(callbacks)).get();
+    }
+
+    @Test
     public void uninstallThenReinstall_doesNotApplyOldRemovalToNewRow() throws Exception {
         MODEL_EXECUTOR.submit(() -> insert(84, missingIntent(), Favorites.CONTAINER_DESKTOP, 7, 0, mSerial)).get();
         mApp.getModel().newModelCallbacks().onPackageRemoved("missing.external.app", Process.myUserHandle());

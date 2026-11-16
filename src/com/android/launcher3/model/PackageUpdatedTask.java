@@ -17,6 +17,7 @@ package com.android.launcher3.model;
 
 import app.lawnchair.model.WorkspaceAvailability;
 import app.lawnchair.model.WorkspaceAvailabilityStore;
+import app.lawnchair.model.WorkspaceAppUpdate;
 
 import static com.android.launcher3.model.BgDataModel.Callbacks.FLAG_PRIVATE_PROFILE_QUIET_MODE_ENABLED;
 import static com.android.launcher3.model.BgDataModel.Callbacks.FLAG_QUIET_MODE_ENABLED;
@@ -269,6 +270,7 @@ public class PackageUpdatedTask implements ModelUpdateTask {
 
                     boolean infoUpdated = false;
                     boolean shortcutUpdated = false;
+                    boolean preserveOriginalTarget = false;
 
                     ComponentName cn = si.getTargetComponent();
                     if (cn != null && matcher.test(si)) {
@@ -293,10 +295,9 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                                 if (decision == WorkspaceAvailabilityStore.AVAILABLE) {
                                     // The original component resolved: update this object/row, not a fallback activity or installation queue entry.
                                     si.runtimeStatusFlags &= ~WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
-                                    availability.refreshAppearance(si);
                                     forceKeepShortcuts.add(si.id);
-                                    updatedWorkspaceItems.add(si);
-                                    return;
+                                    preserveOriginalTarget = true;
+                                    shortcutUpdated = true;
                                 }
                             }
                         }
@@ -368,7 +369,7 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                                 si.status = WorkspaceItemInfo.DEFAULT;
                                 infoUpdated = true;
                             }
-                        } else if (isNewApkAvailable && removedComponents.contains(cn)) {
+                        } else if (!preserveOriginalTarget && isNewApkAvailable && removedComponents.contains(cn)) {
                             if (updateWorkspaceItemIntent(context, si, packageName)) {
                                 infoUpdated = true;
                             }
@@ -377,37 +378,42 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                         if (isNewApkAvailable) {
                             List<LauncherActivityInfo> activities = activitiesLists.get(
                                     packageName);
-                            // TODO: See if we can migrate this to
-                            //  AppInfo#updateRuntimeFlagsForActivityTarget
-                            si.setProgressLevel(
-                                    activities == null || activities.isEmpty()
-                                            ? 100
-                                            : PackageManagerHelper.getLoadingProgress(
-                                            activities.get(0)),
-                                    PackageInstallInfo.STATUS_INSTALLED_DOWNLOADING);
-                            // In case an app is archived, we need to make sure that archived state
-                            // in WorkspaceItemInfo is refreshed.
-                            try {
-                                if (Flags.enableSupportForArchiving() && !activities.isEmpty()) {
-                                    boolean newArchivalState = activities.get(
-                                            0).getActivityInfo().isArchived;
-                                    if (newArchivalState != si.isArchived()) {
-                                        si.runtimeStatusFlags ^= FLAG_ARCHIVED;
-                                        infoUpdated = true;
+                            final boolean keepOriginalTarget = preserveOriginalTarget;
+                            final LauncherActivityInfo targetActivity = activities == null ? null
+                                    : (keepOriginalTarget ? activities.stream()
+                                            .filter(activity -> cn.equals(activity.getComponentName())).findFirst().orElse(null)
+                                            : (activities.isEmpty() ? null : activities.get(0)));
+                            WorkspaceAppUpdate.reconcile(new WorkspaceAppUpdate.Target() {
+                                @Override public void updateProgress() {
+                                    if (targetActivity != null || !keepOriginalTarget) {
+                                        si.setProgressLevel(targetActivity == null ? 100
+                                                : PackageManagerHelper.getLoadingProgress(targetActivity),
+                                                PackageInstallInfo.STATUS_INSTALLED_DOWNLOADING);
                                     }
                                 }
-                            } catch (Throwable t) {
-                                // ignore
-                            }
-
-                            if (si.itemType == Favorites.ITEM_TYPE_APPLICATION) {
-                                if (activities != null && !activities.isEmpty()) {
-                                    si.setNonResizeable(ApiWrapper.INSTANCE.get(context)
-                                            .isNonResizeableActivity(activities.get(0)));
+                                @Override public void updateResizability() {
+                                    if (si.itemType == Favorites.ITEM_TYPE_APPLICATION && targetActivity != null) {
+                                        si.setNonResizeable(ApiWrapper.INSTANCE.get(context).isNonResizeableActivity(targetActivity));
+                                    }
                                 }
-                                iconCache.getTitleAndIcon(si, si.usingLowResIcon());
-                                infoUpdated = true;
-                            }
+                                @Override public void updateArchival() {
+                                    try {
+                                        if (Flags.enableSupportForArchiving() && targetActivity != null) {
+                                            boolean archived = targetActivity.getActivityInfo().isArchived;
+                                            if (archived != si.isArchived()) si.runtimeStatusFlags ^= FLAG_ARCHIVED;
+                                        }
+                                    } catch (Throwable ignored) {
+                                        // Preserve the existing archival state on platforms without the API.
+                                    }
+                                }
+                                @Override public void updateAppearance() {
+                                    if (si.itemType == Favorites.ITEM_TYPE_APPLICATION) {
+                                        if (keepOriginalTarget) availability.refreshAppearance(si);
+                                        else iconCache.getTitleAndIcon(si, si.usingLowResIcon());
+                                    }
+                                }
+                            });
+                            infoUpdated = true;
                         }
 
                         int oldRuntimeFlags = si.runtimeStatusFlags;
