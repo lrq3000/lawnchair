@@ -150,7 +150,8 @@ public class WorkspaceItemInfo extends ItemInfoWithIcon {
                 .put(Favorites.RESTORED, status);
 
         if (!unavailableApplication && !usingLowResIcon()) {
-            writer.putIcon(bitmap, user);
+            if (ordinaryApplication) writer.putIcon(bitmap, user, getTargetComponent());
+            else writer.putIcon(bitmap, user);
         }
     }
 

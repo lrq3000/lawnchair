@@ -399,7 +399,7 @@ public class WorkspaceAvailabilityIntegrationTest {
                 .putExtra("original-extra", "kept");
     }
 
-    private static final class TestContext extends SandboxContext {
+    static final class TestContext extends SandboxContext {
         private final java.util.Map<String, Object> mServices = new java.util.HashMap<>();
         private final File mJournalDirectory;
         private final String mPreferencesPrefix = "shortcut-reliability-" + UUID.randomUUID() + "-";

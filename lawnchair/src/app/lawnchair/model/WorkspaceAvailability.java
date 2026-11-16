@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.LauncherActivityInfo;
 import android.content.pm.LauncherApps;
+import android.graphics.drawable.Drawable;
 import android.database.Cursor;
 import android.os.Environment;
 import android.os.UserHandle;
@@ -28,6 +29,10 @@ import com.android.launcher3.model.data.IconRequestInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.pm.UserCache;
 import com.android.launcher3.util.ContentWriter;
+import com.android.launcher3.icons.BitmapInfo;
+import com.android.launcher3.icons.BaseIconFactory;
+import com.android.launcher3.icons.LauncherIcons;
+import app.lawnchair.icons.LawnchairIconProvider;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -314,6 +319,12 @@ public final class WorkspaceAvailability {
             Log.w(TAG, "Appearance query failed; retaining last valid snapshot", e);
             return;
         }
+        BitmapInfo validIcon = validWorkspaceIcon(mContext, item.getTargetComponent(), item.user, candidate.bitmap);
+        if (validIcon == null) {
+            restoreUnavailableAppearance(item);
+            return;
+        }
+        candidate.bitmap = validIcon;
         if (!TextUtils.isEmpty(candidate.title)) {
             item.title = candidate.title;
             item.contentDescription = candidate.contentDescription;
@@ -330,6 +341,7 @@ public final class WorkspaceAvailability {
         WorkspaceItemInfo candidate = new WorkspaceItemInfo(item);
         try {
             mApp.getIconCache().getTitleAndIcon(candidate, false);
+            candidate.bitmap = validWorkspaceIcon(mContext, item.getTargetComponent(), item.user, candidate.bitmap);
             if (candidate.bitmap != null && !candidate.bitmap.isNullOrLowRes()
                     && !mApp.getIconCache().isDefaultIcon(candidate.bitmap, item.user)) item.bitmap = candidate.bitmap;
             if (TextUtils.isEmpty(item.title) && !TextUtils.isEmpty(candidate.title)) item.title = candidate.title;
@@ -337,6 +349,24 @@ public final class WorkspaceAvailability {
             persistAppearance(item); // Preserve a valid migration cache before later package-cache eviction, even though the target is currently missing.
         } catch (RuntimeException e) {
             Log.w(TAG, "Icon cache unavailable; retaining favorites snapshot", e);
+        }
+    }
+
+    /** Reject a configured source that did not load; when it does load, rasterize that drawable rather than trusting a possibly stock cache entry. */
+    public static BitmapInfo validWorkspaceIcon(Context context, ComponentName component, UserHandle user, BitmapInfo candidate) {
+        LauncherAppState app = LauncherAppState.getInstance(context);
+        if (component == null || !(app.getIconProvider() instanceof LawnchairIconProvider)) return candidate;
+        try {
+            WorkspaceIconSource<Drawable> source = ((LawnchairIconProvider) app.getIconProvider())
+                    .getWorkspaceIconSource(component, user, app.getInvariantDeviceProfile().fillResIconDpi);
+            if (!source.isUsable()) return null;
+            if (!source.isConfigured()) return candidate;
+            try (LauncherIcons icons = LauncherIcons.obtain(context)) {
+                return icons.createBadgedIconBitmap(source.getIcon(), new BaseIconFactory.IconOptions().setUser(user));
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Configured workspace icon unresolved; retaining last custom snapshot", e);
+            return null;
         }
     }
 
@@ -355,7 +385,7 @@ public final class WorkspaceAvailability {
                         .getSerialNumberForUser(item.user)), item.intent.toUri(0)}));
         if (!TextUtils.isEmpty(item.title)) writer.put(Favorites.TITLE, item.title);
         if (item.bitmap != null && !item.bitmap.isNullOrLowRes()
-                && !mApp.getIconCache().isDefaultIcon(item.bitmap, item.user)) writer.putIcon(item.bitmap, item.user);
+                && !mApp.getIconCache().isDefaultIcon(item.bitmap, item.user)) writer.putIcon(item.bitmap, item.user, item.getTargetComponent());
         try {
             writer.commit();
         } catch (RuntimeException e) {

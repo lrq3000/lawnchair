@@ -23,6 +23,8 @@ class IconOverrideRepository(private val context: Context) : SafeCloseable {
     private val dao = AppDatabase.INSTANCE.get(context).iconOverrideDao()
     private var _overridesMap = mapOf<ComponentKey, IconPickerItem>()
     val overridesMap get() = _overridesMap
+    @Volatile var overridesLoaded = false
+        private set
 
     private val updatePackageQueue = ConcurrentLinkedQueue<ComponentKey>()
 
@@ -35,6 +37,7 @@ class IconOverrideRepository(private val context: Context) : SafeCloseable {
                         keySelector = { it.target },
                         valueTransform = { it.iconPickerItem },
                     )
+                    overridesLoaded = true
                     while (updatePackageQueue.isNotEmpty()) {
                         val target = updatePackageQueue.poll() ?: continue
                         updatePackageIcons(target)

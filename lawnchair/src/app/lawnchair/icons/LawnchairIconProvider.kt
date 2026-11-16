@@ -26,6 +26,7 @@ import android.util.ArrayMap
 import android.util.Log
 import androidx.core.content.getSystemService
 import app.lawnchair.data.iconoverride.IconOverrideRepository
+import app.lawnchair.model.WorkspaceIconSource
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.util.Constants.LAWNICONS_PACKAGE_NAME
 import app.lawnchair.util.MultiSafeCloseable
@@ -109,6 +110,19 @@ class LawnchairIconProvider @JvmOverloads constructor(
         }
         // finally, look for normal icon
         return iconPack.getIcon(componentName)
+    }
+
+    /** Resolve the configured source without the stock fallback used for normal app-drawer rendering. */
+    fun getWorkspaceIconSource(componentName: ComponentName, user: UserHandle, iconDpi: Int): WorkspaceIconSource<Drawable> {
+        if (!overrideRepo.overridesLoaded) return WorkspaceIconSource.resolve(true, { null }, { null })
+        val explicit = overrideRepo.overridesMap[ComponentKey(componentName, user)]
+        val pack = iconPack
+        val entry = explicit?.toIconEntry() ?: pack?.getCalendar(componentName) ?: pack?.getIcon(componentName)
+        val unresolvedPack = explicit == null && iconPackPref.get().isNotEmpty() && pack == null
+        return WorkspaceIconSource.resolve(entry != null || unresolvedPack, {
+            val selected = if (entry?.type == IconType.Calendar) entry.resolveDynamicCalendar(getDay()) else entry
+            selected?.let { iconPackProvider.getDrawable(it, iconDpi, user) }
+        }, { null })
     }
 
     override fun getIconWithOverrides(
