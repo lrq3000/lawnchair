@@ -24,3 +24,10 @@ Plan: `C:/git/android-launchers-shortcuts-fix/docs/superpowers/plans/2026-11-16-
 - `JAVA_HOME=C:/Program Files/Java/jdk-21 ANDROID_HOME=C:/Users/33632/AppData/Local/Android/Sdk ./gradlew.bat help --offline --console=plain -q`: failed resolving uncached `com.gradle.develocity:4.3.1`. Wrapper downloaded Gradle 9.3.0 despite offline mode applying only after wrapper startup; no global installation or configuration edit was made.
 - Coordinator build command: `./gradlew.bat assembleLawnWithQuickstepGithubDebug --console=plain -q`; configured minSdk is 26 (including withQuickstep), debug package is `app.lawnchair.debug`. Actual APK manifest remains to verify. Compile SDK is 36.1 and build-tools 36.1.0; installed SDK availability needs coordinator reconciliation.
 - Native version mechanism: `build.gradle` versionCode has final two-digit revision field (`15_00_02_03_00` baseline); releaseName controls Beta display. Coordinator should bump revision for publication without advancing upstream sources.
+
+## Milestone 1: durable policy
+
+- `python tools/test_workspace_availability.py` RED: production API skeleton returned REMOVE for unknown migration history; executable assertion failed `Expected 1, got 0` in `missingMigrationTargetSurvivesRestart`.
+- Same command GREEN: 15 production policy/codec tests passed, JDK 21 `javac -Xlint:all`, no Android mocks. Covers process restart, known internal policy, recovery, exact components, profiles, database identity, row reuse, confirmed uninstall, interrupted acknowledgement, reinstall, corrupt/future/unreadable metadata, failed atomic writes, and unmapped adopted storage.
+- The test persistence boundary models all-or-nothing writes; actual Android AtomicFile implementation and favorites integration require separate Android validation. Host tests do not establish end-to-end behavior.
+- Temporary generated classes: `%LOCALAPPDATA%/Temp/opencode/lawnchair-availability-tests`; retained for manual cleanup.
