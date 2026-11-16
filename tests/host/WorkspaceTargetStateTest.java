@@ -17,7 +17,7 @@ public final class WorkspaceTargetStateTest {
         Disk disk = new Disk();
         WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
         WorkspaceAvailabilityStore.Row row = new WorkspaceAvailabilityStore.Row(
-                "db", 73, 10, "pkg", "pkg/Main", "original-intent-with-extras", 100);
+                "db", 73, 10, "pkg", "pkg/Main", "original-intent-with-extras", 100, "row-token");
         store.observe(10, "pkg", true, "uuid", null);
         int first = store.evaluate(row, true); // Exact component is initially registered.
         WorkspaceTargetState state = new WorkspaceTargetState(first, () -> {

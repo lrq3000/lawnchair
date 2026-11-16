@@ -31,6 +31,7 @@ public final class WorkspaceAvailabilityStoreTest {
         unchangedRecoveryRetriesTransientWriteFailure();
         unchangedObservationRetriesTransientWriteFailure();
         dirtyInternalHistoryCannotAuthorizeDeletion();
+        delayedUninstallCannotMatchReusedIdEvenWithIdenticalTimestamp();
         System.out.println("PASS " + count + " production availability policy/store tests");
     }
 
@@ -96,7 +97,7 @@ public final class WorkspaceAvailabilityStoreTest {
         WorkspaceAvailabilityStore.Row old = row(1, 10, "Main");
         store.uninstall(10, "pkg", Collections.singletonList(old));
         WorkspaceAvailabilityStore.Row newDb = new WorkspaceAvailabilityStore.Row(
-                "different-db", 1, 10, "pkg", "Main", "original-intent", 100);
+                "different-db", 1, 10, "pkg", "Main", "original-intent", 100, "row-token");
         equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(newDb, true));
         equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(old, true));
         count++;
@@ -134,7 +135,7 @@ public final class WorkspaceAvailabilityStoreTest {
         store.uninstall(10, "pkg", Collections.singletonList(old));
         store.observe(10, "pkg", true, "uuid", null);
         WorkspaceAvailabilityStore.Row newer = new WorkspaceAvailabilityStore.Row(
-                "db", 1, 10, "pkg", "Main", "original-intent", 200);
+                "db", 1, 10, "pkg", "Main", "original-intent", 200, "new-insert-token");
         equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(newer, true));
         equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(old, true));
         count++;
@@ -219,7 +220,7 @@ public final class WorkspaceAvailabilityStoreTest {
         WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
         store.observe(10, "pkg", false, null, null);
         WorkspaceAvailabilityStore.Row row = new WorkspaceAvailabilityStore.Row("db", 1, 10,
-                "pkg", "Main", "intent-extra=" + "x".repeat(70000), 100);
+                "pkg", "Main", "intent-extra=" + "x".repeat(70000), 100, "row-token");
         store.uninstall(10, "pkg", Collections.singletonList(row));
         store = new WorkspaceAvailabilityStore(disk);
         equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(row, true));
@@ -265,9 +266,24 @@ public final class WorkspaceAvailabilityStoreTest {
         count++;
     }
 
+    private static void delayedUninstallCannotMatchReusedIdEvenWithIdenticalTimestamp() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        WorkspaceAvailabilityStore.Row old = new WorkspaceAvailabilityStore.Row("db", 99, 10,
+                "pkg", "Main", "identical-intent", 100, "first-insert-token");
+        WorkspaceAvailabilityStore.Row fresh = new WorkspaceAvailabilityStore.Row("db", 99, 10,
+                "pkg", "Main", "identical-intent", 100, "second-insert-token");
+        store.uninstall(10, "pkg", Collections.singletonList(old));
+        store.availabilityEvent(10, "pkg");
+        store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.AVAILABLE, store.evaluate(fresh, true));
+        equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(old, true));
+        count++;
+    }
+
     private static WorkspaceAvailabilityStore.Row row(int id, long serial, String component) {
         return new WorkspaceAvailabilityStore.Row("db", id, serial, "pkg", component,
-                "original-intent", 100);
+                "original-intent", 100, "row-token");
     }
 
     private static void equal(Object expected, Object actual) {

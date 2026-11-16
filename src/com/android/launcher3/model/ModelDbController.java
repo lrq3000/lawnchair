@@ -107,6 +107,7 @@ public class ModelDbController {
 
     private final Context mContext;
     private final String mUnverifiedWorkspaceIdentity = "unverified:" + java.util.UUID.randomUUID();
+    private SQLiteDatabase mAvailabilityGenerationDb;
 
     public ModelDbController(Context context) {
         mContext = context;
@@ -117,6 +118,10 @@ public class ModelDbController {
         createDbIfNotExists();
         SQLiteDatabase db = mOpenHelper.getWritableDatabase();
         try {
+            if (mAvailabilityGenerationDb != db) {
+                ensureWorkspaceItemGenerations(db);
+                mAvailabilityGenerationDb = db;
+            }
             if (tableExists(db, "workspace_availability_identity")) {
                 String existing = readWorkspaceIdentity(db);
                 if (existing != null) return existing;
@@ -150,9 +155,30 @@ public class ModelDbController {
             db.execSQL(CREATE_AVAILABILITY_IDENTITY);
             db.execSQL("INSERT OR REPLACE INTO workspace_availability_identity(singleton, token) VALUES(1, ?)",
                     new Object[] {java.util.UUID.randomUUID().toString()});
+            ensureWorkspaceItemGenerations(db);
+            db.execSQL("UPDATE workspace_item_generation SET token=lower(hex(randomblob(16)))");
         } catch (android.database.sqlite.SQLiteException e) {
             // Optional metadata must never make the existing restore machinery fall back to an empty favorites database.
             Log.e(TAG, "Could not renew availability identity", e);
+        }
+    }
+
+    private static void ensureWorkspaceItemGenerations(SQLiteDatabase db) {
+        // INSERT triggers distinguish a new favorite from an old installation even when ID, intent, and millisecond timestamp are all reused.
+        db.execSQL("CREATE TABLE IF NOT EXISTS workspace_item_generation (item_id INTEGER PRIMARY KEY, token TEXT NOT NULL)");
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS workspace_item_generation_insert AFTER INSERT ON favorites BEGIN INSERT OR REPLACE INTO workspace_item_generation(item_id, token) VALUES(new._id, lower(hex(randomblob(16)))); END");
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS workspace_item_generation_delete AFTER DELETE ON favorites BEGIN DELETE FROM workspace_item_generation WHERE item_id=old._id; END");
+        db.execSQL("INSERT OR IGNORE INTO workspace_item_generation(item_id, token) SELECT _id, lower(hex(randomblob(16))) FROM favorites");
+    }
+
+    public String getWorkspaceItemGeneration(int id) {
+        getWorkspaceIdentity();
+        try (Cursor cursor = mOpenHelper.getReadableDatabase().rawQuery(
+                "SELECT token FROM workspace_item_generation WHERE item_id=?", new String[] {Integer.toString(id)})) {
+            return cursor.moveToFirst() ? cursor.getString(0) : "";
+        } catch (android.database.sqlite.SQLiteException e) {
+            Log.e(TAG, "Item incarnation unresolved; old removal snapshots cannot authorize deletion", e);
+            return "";
         }
     }
 

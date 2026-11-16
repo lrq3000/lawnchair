@@ -216,12 +216,18 @@ public final class WorkspaceAvailability {
         Set<Integer> removed = new HashSet<>();
         for (WorkspaceAvailabilityStore.Row row : store().removals()) {
             if (!identity().equals(row.database)) continue;
+            if (row.incarnation.isEmpty()) {
+                // Pre-incarnation journal entries cannot safely identify a possibly reused row; never turn uncertain migration metadata into a purge.
+                store().acknowledge(row);
+                continue;
+            }
             mDb.delete(Favorites.TABLE_NAME,
                     Favorites._ID + "=? AND " + Favorites.PROFILE_ID + "=? AND "
                             + Favorites.INTENT + "=? AND " + Favorites.MODIFIED + "=? AND "
-                            + Favorites.ITEM_TYPE + "=0 AND " + Favorites.RESTORED + "=0",
+                            + Favorites.ITEM_TYPE + "=0 AND " + Favorites.RESTORED + "=0 AND EXISTS "
+                            + "(SELECT 1 FROM workspace_item_generation WHERE item_id=favorites._id AND token=?)",
                     new String[] {Integer.toString(row.id), Long.toString(row.serial), row.intent,
-                            Long.toString(row.modified)});
+                            Long.toString(row.modified), row.incarnation});
             if (model != null) {
                 ItemInfo item = model.itemsIdMap.get(row.id);
                 if (isOrdinaryApplication(item) && item.getTargetComponent() != null
@@ -407,7 +413,7 @@ public final class WorkspaceAvailability {
         int modifiedIndex = cursor.getColumnIndex(Favorites.MODIFIED);
         return new WorkspaceAvailabilityStore.Row(identity(), cursor.id, cursor.serialNumber,
                 original.getComponent().getPackageName(), original.getComponent().flattenToString(),
-                original.toUri(0), modifiedIndex < 0 ? 0 : cursor.getLong(modifiedIndex));
+                original.toUri(0), modifiedIndex < 0 ? 0 : cursor.getLong(modifiedIndex), mDb.getWorkspaceItemGeneration(cursor.id));
     }
 
     private WorkspaceAvailabilityStore.Row findRow(WorkspaceItemInfo item) {
@@ -439,7 +445,8 @@ public final class WorkspaceAvailability {
             if (component == null) return null;
             return new WorkspaceAvailabilityStore.Row(identity(), c.getInt(c.getColumnIndexOrThrow(Favorites._ID)),
                     c.getLong(c.getColumnIndexOrThrow(Favorites.PROFILE_ID)), component.getPackageName(),
-                    component.flattenToString(), savedIntent, c.getLong(c.getColumnIndexOrThrow(Favorites.MODIFIED)));
+                    component.flattenToString(), savedIntent, c.getLong(c.getColumnIndexOrThrow(Favorites.MODIFIED)),
+                    mDb.getWorkspaceItemGeneration(c.getInt(c.getColumnIndexOrThrow(Favorites._ID))));
         } catch (Exception e) {
             // Corrupt intents remain on the loader's existing validation path, never a guessed package match.
             return null;

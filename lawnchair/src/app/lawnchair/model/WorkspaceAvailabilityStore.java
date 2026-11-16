@@ -21,7 +21,7 @@ public final class WorkspaceAvailabilityStore {
     public static final int KEEP = 1;
     public static final int AVAILABLE = 2;
     private static final int MAGIC = 0x4c435741;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_RECORDS = 100000;
     private final Persistence mPersistence;
     private final Map<String, PackageState> mPackages = new HashMap<>();
@@ -51,9 +51,10 @@ public final class WorkspaceAvailabilityStore {
         public final String component;
         public final String intent;
         public final long modified;
+        public final String incarnation;
 
         public Row(String db, int id, long serial, String pkg, String component,
-                String intent, long modified) {
+                String intent, long modified, String incarnation) {
             database = db;
             this.id = id;
             this.serial = serial;
@@ -61,6 +62,7 @@ public final class WorkspaceAvailabilityStore {
             this.component = component;
             this.intent = intent;
             this.modified = modified;
+            this.incarnation = incarnation == null ? "" : incarnation;
         }
 
         private String identity() {
@@ -68,7 +70,7 @@ public final class WorkspaceAvailabilityStore {
         }
 
         private String fingerprint() {
-            return identity() + "\n" + modified + "\n" + intent;
+            return identity() + "\n" + modified + "\n" + intent + "\n" + incarnation;
         }
     }
 
@@ -239,7 +241,9 @@ public final class WorkspaceAvailabilityStore {
         DataInputStream tail = new DataInputStream(new ByteArrayInputStream(bytes, bytes.length - 8, 8));
         if (tail.readLong() != checksum.getValue()) throw new IOException("Invalid checksum");
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes, 0, bytes.length - 8));
-        if (in.readInt() != MAGIC || in.readInt() != VERSION) throw new IOException("Unknown schema");
+        if (in.readInt() != MAGIC) throw new IOException("Unknown schema");
+        int version = in.readInt();
+        if (version < 1 || version > VERSION) throw new IOException("Unknown schema");
         int size = count(in);
         for (int i = 0; i < size; i++) {
             String key = in.readUTF();
@@ -252,8 +256,8 @@ public final class WorkspaceAvailabilityStore {
             state.generation = in.readLong();
             mPackages.put(key, state);
         }
-        readRows(in, mRecovering, false);
-        readRows(in, mRemovals, true);
+        readRows(in, mRecovering, false, version);
+        readRows(in, mRemovals, true, version);
         if (in.available() != 0) throw new IOException("Trailing data");
     }
 
@@ -270,14 +274,15 @@ public final class WorkspaceAvailabilityStore {
             out.writeInt(intent.length);
             out.write(intent);
             out.writeLong(row.modified);
+            out.writeUTF(row.incarnation);
         }
     }
 
-    private static void readRows(DataInputStream in, Map<String, Row> rows, boolean removal) throws IOException {
+    private static void readRows(DataInputStream in, Map<String, Row> rows, boolean removal, int version) throws IOException {
         int size = count(in);
         for (int i = 0; i < size; i++) {
             Row row = new Row(in.readUTF(), in.readInt(), in.readLong(), in.readUTF(),
-                    in.readUTF(), readIntent(in), in.readLong());
+                    in.readUTF(), readIntent(in), in.readLong(), version >= 2 ? in.readUTF() : "");
             rows.put(removal ? row.fingerprint() : row.identity(), row);
         }
     }

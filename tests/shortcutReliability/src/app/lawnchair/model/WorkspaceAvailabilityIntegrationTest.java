@@ -389,6 +389,37 @@ public class WorkspaceAvailabilityIntegrationTest {
     }
 
     @Test
+    public void delayedRemovalSnapshot_andOverlappingAvailability_doNotDeleteReusedMaximumIdWithSameTimestamp() throws Exception {
+        MODEL_EXECUTOR.submit(() -> {
+            Intent original = missingIntent();
+            insert(99, original, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            String before = mDb.getWorkspaceItemGeneration(99);
+            long modified;
+            try (Cursor c = mDb.query(Favorites.TABLE_NAME, new String[] {Favorites.MODIFIED}, "_id=99", null, null)) {
+                assertTrue(c.moveToFirst());
+                modified = c.getLong(0);
+            }
+            // Durable old uninstall, interrupted before favorites deletion/acknowledgement.
+            mApp.getModel().getWorkspaceAvailability().recordEvent(com.android.launcher3.model.PackageUpdatedTask.OP_REMOVE,
+                    Process.myUserHandle(), new String[] {"missing.external.app"});
+            mDb.delete(Favorites.TABLE_NAME, "_id=99", null);
+            insert(99, original, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            ContentValues collision = new ContentValues();
+            collision.put(Favorites.MODIFIED, modified);
+            mDb.getDb().update(Favorites.TABLE_NAME, collision, "_id=99", null);
+            assertNotEquals(before, mDb.getWorkspaceItemGeneration(99));
+        }).get();
+        mApp.getModel().newModelCallbacks().onPackagesAvailable(new String[] {"missing.external.app"}, Process.myUserHandle(), false);
+        mApp.getModel().newModelCallbacks().onPackageAdded("missing.external.app", Process.myUserHandle());
+        MODEL_EXECUTOR.submit(() -> {
+            assertTrue(mApp.getModel().getWorkspaceAvailability().hasFavorite(99));
+            BgDataModel model = new BgDataModel();
+            assertNotNull(load(99, model));
+            assertEquals(1, model.itemsIdMap.size());
+        }).get();
+    }
+
+    @Test
     public void lateUninstall_afterBinderEntry_fencesOldQueuedIconsAndKeepsFreshHealthyBinding() throws Exception {
         BgDataModel oldData = new BgDataModel();
         MODEL_EXECUTOR.submit(() -> {
