@@ -538,11 +538,14 @@ public class WorkspaceAvailabilityIntegrationTest {
         private final java.util.Map<String, Object> mServices = new java.util.HashMap<>();
         private final File mJournalDirectory;
         private final String mPreferencesPrefix = "shortcut-reliability-" + UUID.randomUUID() + "-";
+        private final app.lawnchair.data.AppDatabase mOverrideDatabase;
 
         TestContext(Context context) {
             super(context);
             mJournalDirectory = new File(context.getCacheDir(), "shortcut-reliability-" + UUID.randomUUID());
             if (!mJournalDirectory.mkdirs()) throw new IllegalStateException("Cannot isolate test journal");
+            mOverrideDatabase = androidx.room.Room.inMemoryDatabaseBuilder(context,
+                    app.lawnchair.data.AppDatabase.class).build();
         }
 
         @Override
@@ -561,9 +564,26 @@ public class WorkspaceAvailabilityIntegrationTest {
         }
 
         @Override
+        public void onDestroy() {
+            try {
+                // Repositories and model observers close first; their DAO's database is owned by this fixture, not by those repositories.
+                super.onDestroy();
+            } finally {
+                mOverrideDatabase.close();
+            }
+        }
+
+        app.lawnchair.data.AppDatabase overrideDatabase() {
+            return mOverrideDatabase;
+        }
+
+        @Override
         @SuppressWarnings("unchecked")
         public <T extends SafeCloseable> T createObject(MainThreadInitializedObject<T> object) {
             if (object == LauncherAppState.INSTANCE) return (T) new LauncherAppState(this, null);
+            if (object == app.lawnchair.data.iconoverride.IconOverrideRepository.INSTANCE) {
+                return (T) new app.lawnchair.data.iconoverride.IconOverrideRepository(this, mOverrideDatabase.iconOverrideDao());
+            }
             return super.createObject(object);
         }
     }

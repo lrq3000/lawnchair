@@ -571,7 +571,8 @@ public class ModelDbController {
     public synchronized void loadDefaultFavoritesIfNecessary() {
         createDbIfNotExists();
 
-        if (!(mContext instanceof LauncherPreviewRenderer.PreviewContext)) {
+        if (!(mContext instanceof SandboxContext)) {
+            // Sandbox databases are in-memory (see createDatabaseHelper); they do not own the real application's on-disk layouts.
             LawnchairAppKt.getLawnchairApp(mContext).cleanUpDatabases();
         }
 

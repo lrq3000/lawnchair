@@ -114,7 +114,8 @@ class IconPackProvider(private val context: Context) : SafeCloseable {
     }
 
     override fun close() {
-        TODO("Not yet implemented")
+        // Release this provider's cache; IconPack's shared loader scope is process-owned and must not be canceled here.
+        iconPacks.clear()
     }
 
     companion object {

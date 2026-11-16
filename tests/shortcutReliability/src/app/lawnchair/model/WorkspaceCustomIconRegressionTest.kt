@@ -26,12 +26,43 @@ import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class WorkspaceCustomIconRegressionTest {
+    @Test
+    fun repositoryClose_doesNotCloseBorrowedDatabase_orShareFixtureOverrides() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val first = WorkspaceAvailabilityIntegrationTest.TestContext(instrumentation.targetContext)
+        val second = WorkspaceAvailabilityIntegrationTest.TestContext(instrumentation.targetContext)
+        try {
+            val firstRepo = MAIN_EXECUTOR.submit<IconOverrideRepository> { IconOverrideRepository.INSTANCE.get(first) }.get()
+            val secondRepo = MAIN_EXECUTOR.submit<IconOverrideRepository> { IconOverrideRepository.INSTANCE.get(second) }.get()
+            val component = ComponentName(instrumentation.context.packageName, WorkspaceAvailabilityIntegrationTest.TargetActivity::class.java.name)
+            val key = ComponentKey(component, Process.myUserHandle())
+            val selected = IconPickerItem("isolated.pack", "resource", "Isolated override", IconType.Normal)
+            assertNotSame(firstRepo, secondRepo)
+            runBlocking {
+                firstRepo.setOverride(key, selected)
+                withTimeout(10_000) {
+                    while (!firstRepo.overridesLoaded || firstRepo.overridesMap[key] != selected || !secondRepo.overridesLoaded) delay(20)
+                }
+                assertFalse(secondRepo.overridesMap.containsKey(key))
+                MAIN_EXECUTOR.submit { firstRepo.close(); firstRepo.close() }.get()
+                assertTrue(first.overrideDatabase().isOpen)
+                assertEquals(selected, first.overrideDatabase().iconOverrideDao().observeTarget(key).first()?.iconPickerItem)
+            }
+        } finally {
+            MODEL_EXECUTOR.submit { }.get()
+            MAIN_EXECUTOR.submit { try { first.onDestroy() } finally { second.onDestroy() } }.get()
+        }
+        assertFalse(first.overrideDatabase().isOpen)
+        assertFalse(second.overrideDatabase().isOpen)
+    }
+
     @Test
     fun missingConfiguredResource_doesNotPersistStockBeforeTargetBecomesUnavailable() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
