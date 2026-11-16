@@ -388,6 +388,63 @@ public class WorkspaceAvailabilityIntegrationTest {
         }).get();
     }
 
+    @Test
+    public void lateUninstall_afterBinderEntry_fencesOldQueuedIconsAndKeepsFreshHealthyBinding() throws Exception {
+        BgDataModel oldData = new BgDataModel();
+        MODEL_EXECUTOR.submit(() -> {
+            insert(91, missingIntent(), Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            load(91, oldData);
+        }).get();
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch resume = new java.util.concurrent.CountDownLatch(1);
+        java.util.Set<Integer> bound = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        BgDataModel.Callbacks oldCallbacks = new BgDataModel.Callbacks() {
+            @Override public com.android.launcher3.util.IntSet getPagesToBindSynchronously(com.android.launcher3.util.IntArray pages) {
+                entered.countDown();
+                try {
+                    if (!resume.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("Binder race latch timed out");
+                } catch (InterruptedException e) { throw new AssertionError(e); }
+                return new com.android.launcher3.util.IntSet();
+            }
+            @Override public void bindItems(java.util.List<ItemInfo> items, boolean animate) {
+                for (ItemInfo item : items) bound.add(item.id);
+            }
+        };
+        com.android.launcher3.model.BaseLauncherBinder oldBinder = new com.android.launcher3.model.BaseLauncherBinder(
+                mApp, oldData, new com.android.launcher3.model.AllAppsList(mApp.getIconCache(), new com.android.launcher3.AppFilter(mContext)),
+                new BgDataModel.Callbacks[] {oldCallbacks});
+        java.util.concurrent.Future<?> oldBind = MODEL_EXECUTOR.submit(() -> oldBinder.bindWorkspace(true, false));
+        assertTrue(entered.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        try {
+            MAIN_EXECUTOR.submit(() -> mApp.getModel().newModelCallbacks()
+                    .onPackageRemoved("missing.external.app", Process.myUserHandle())).get();
+        } finally { resume.countDown(); }
+        oldBind.get();
+        MODEL_EXECUTOR.submit(() -> { }).get();
+        MAIN_EXECUTOR.submit(() -> { }).get();
+        assertFalse(bound.contains(91));
+        BgDataModel healthy = new BgDataModel();
+        MODEL_EXECUTOR.submit(() -> {
+            Intent healthyIntent = new Intent(Intent.ACTION_MAIN).setComponent(new ComponentName("healthy.other.app", "healthy.other.app.Main"));
+            insert(92, healthyIntent, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
+            load(92, healthy);
+            BgDataModel.Callbacks current = new BgDataModel.Callbacks() {
+                @Override public void bindItems(java.util.List<ItemInfo> items, boolean animate) {
+                    for (ItemInfo item : items) bound.add(item.id);
+                }
+            };
+            new com.android.launcher3.model.BaseLauncherBinder(mApp, healthy,
+                    new com.android.launcher3.model.AllAppsList(mApp.getIconCache(), new com.android.launcher3.AppFilter(mContext)),
+                    new BgDataModel.Callbacks[] {current}).bindWorkspace(true, false);
+        }).get();
+        MAIN_EXECUTOR.submit(() -> { }).get();
+        assertTrue(bound.contains(92));
+        MODEL_EXECUTOR.submit(() -> {
+            assertFalse(mApp.getModel().getWorkspaceAvailability().hasFavorite(91));
+            assertTrue(mApp.getModel().getWorkspaceAvailability().hasFavorite(92));
+        }).get();
+    }
+
     private WorkspaceItemInfo load(int id, BgDataModel model) {
         return (WorkspaceItemInfo) loadItem(id, model);
     }

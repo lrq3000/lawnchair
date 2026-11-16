@@ -37,11 +37,12 @@ class ModelTaskController(
     private val model: LauncherModel,
     private val uiExecutor: Executor
 ) {
+    private val bindingToken = model.workspaceBindingGeneration.capture()
 
     /** Schedules a {@param task} to be executed on the current callbacks. */
     fun scheduleCallbackTask(task: CallbackTask) {
         for (cb in model.callbacks) {
-            uiExecutor.execute { task.execute(cb) }
+            uiExecutor.execute { if (bindingToken.isCurrent) task.execute(cb) }
         }
     }
 

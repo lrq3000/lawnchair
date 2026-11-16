@@ -139,6 +139,7 @@ public class LauncherModel implements InstallSessionTracker.Callback {
     private long mAvailabilityRetryDelay = 1000;
     private final Runnable mAvailabilityRetry = this::revalidateWorkspaceAvailability;
     private final Runnable mAvailabilityRequest = this::runAvailabilityCheck;
+    private final app.lawnchair.model.WorkspaceBindingGeneration mWorkspaceBindingGeneration = new app.lawnchair.model.WorkspaceBindingGeneration();
 
     public boolean isModelLoaded() {
         synchronized (mLock) {
@@ -200,6 +201,10 @@ public class LauncherModel implements InstallSessionTracker.Callback {
 
     public app.lawnchair.model.WorkspaceAvailability getWorkspaceAvailability() {
         return mWorkspaceAvailability;
+    }
+
+    public app.lawnchair.model.WorkspaceBindingGeneration getWorkspaceBindingGeneration() {
+        return mWorkspaceBindingGeneration;
     }
 
     /** Drain consequential package events before either the unloaded-task discard gate or a loader bind. Model thread only. */
@@ -678,12 +683,12 @@ public class LauncherModel implements InstallSessionTracker.Callback {
         if (task instanceof PackageUpdatedTask) {
             PackageUpdatedTask event = (PackageUpdatedTask) task;
             mPendingPackageEvents.add(event);
-            boolean interruptLoad;
-            synchronized (mLock) {
-                interruptLoad = event.isConfirmedRemoval() && mIsLoaderTaskRunning;
+            if (event.isConfirmedRemoval()) {
+                // Invalidate at receipt, even if an old binder already passed verifyNotStopped or has deferred pages queued.
+                mWorkspaceBindingGeneration.invalidate();
+                // A fresh bind also restores healthy items whose old deferred callback was fenced; no favorites are deleted by invalidation.
+                forceReload();
             }
-            // An uninstall arriving after a loader checkpoint invalidates that load instead of allowing a stale final bind.
-            if (interruptLoad) forceReload();
         }
         MODEL_EXECUTOR.execute(() -> {
             reconcilePendingPackageEvents();

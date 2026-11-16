@@ -16,11 +16,17 @@ subprocess.run([
     str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceIconLoad.java"),
     str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceIconSource.java"),
     str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceAppUpdate.java"),
+    str(ROOT / "lawnchair/src/app/lawnchair/model/WorkspaceBindingGeneration.java"),
     str(ROOT / "tests/host/WorkspaceAvailabilityStoreTest.java"),
     str(ROOT / "tests/host/WorkspaceTargetStateTest.java"),
     str(ROOT / "tests/host/WorkspaceIconLoadTest.java"),
     str(ROOT / "tests/host/WorkspaceIconSourceTest.java"),
     str(ROOT / "tests/host/WorkspaceAppUpdateTest.java"),
+    str(ROOT / "tests/host/WorkspaceBindingGenerationTest.java"),
+], check=True)
+subprocess.run([
+    str(JAVA / "java"), "-ea", "-cp", str(OUTPUT),
+    "app.lawnchair.model.WorkspaceBindingGenerationTest",
 ], check=True)
 subprocess.run([
     str(JAVA / "java"), "-ea", "-cp", str(OUTPUT),
