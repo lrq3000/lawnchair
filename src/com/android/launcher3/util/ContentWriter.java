@@ -40,6 +40,7 @@ public class ContentWriter {
     private CommitParams mCommitParams;
     private BitmapInfo mIcon;
     private UserHandle mUser;
+    private android.content.ComponentName mWorkspaceIconComponent;
 
     public ContentWriter(Context context, CommitParams commitParams) {
         this(context);
@@ -86,6 +87,11 @@ public class ContentWriter {
         return this;
     }
 
+    public ContentWriter putIcon(BitmapInfo value, UserHandle user, android.content.ComponentName component) {
+        mWorkspaceIconComponent = component;
+        return putIcon(value, user);
+    }
+
     public ContentWriter put(String key, UserHandle user) {
         return put(key, UserCache.INSTANCE.get(mContext).getSerialNumberForUser(user));
     }
@@ -96,6 +102,10 @@ public class ContentWriter {
      */
     public ContentValues getValues(Context context) {
         Preconditions.assertNonUiThread();
+        if (mIcon != null && mWorkspaceIconComponent != null) {
+            mIcon = app.lawnchair.model.WorkspaceAvailability.validWorkspaceIcon(
+                    context, mWorkspaceIconComponent, mUser, mIcon);
+        }
         if (mIcon != null && !LauncherAppState.getInstance(context).getIconCache()
                 .isDefaultIcon(mIcon, mUser)) {
             mValues.put(LauncherSettings.Favorites.ICON, GraphicsUtils.flattenBitmap(mIcon.icon));

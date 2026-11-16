@@ -85,6 +85,7 @@ public class BaseLauncherBinder {
     final Callbacks[] mCallbacksList;
 
     private int mMyBindingId;
+    private final app.lawnchair.model.WorkspaceBindingGeneration.Token mBindingToken;
 
     public BaseLauncherBinder(LauncherAppState app, BgDataModel dataModel,
             AllAppsList allAppsList, Callbacks[] callbacksList) {
@@ -93,17 +94,20 @@ public class BaseLauncherBinder {
         mBgDataModel = dataModel;
         mBgAllAppsList = allAppsList;
         mCallbacksList = callbacksList;
+        mBindingToken = app.getModel().getWorkspaceBindingGeneration().capture();
     }
 
     /**
      * Binds all loaded data to actual views on the main thread.
      */
     public void bindWorkspace(boolean incrementBindId, boolean isBindSync) {
+        if (!mBindingToken.isCurrent()) return;
         Trace.beginSection("BaseLauncherBinder#bindWorkspace");
         try {
             if (FeatureFlags.ENABLE_WORKSPACE_LOADING_OPTIMIZATION.get()) {
                 DisjointWorkspaceBinder workspaceBinder = initWorkspaceBinder(incrementBindId,
                         mBgDataModel.collectWorkspaceScreens());
+                if (workspaceBinder == null) return;
                 workspaceBinder.bindCurrentWorkspacePages(isBindSync);
                 workspaceBinder.bindOtherWorkspacePages();
             } else {
@@ -127,13 +131,19 @@ public class BaseLauncherBinder {
             IntArray workspacePages) {
 
         synchronized (mBgDataModel) {
+            if (!claimBindingId(incrementBindId)) return null;
+            return new DisjointWorkspaceBinder(workspacePages);
+        }
+    }
+
+    private boolean claimBindingId(boolean incrementBindId) {
+        return mBindingToken.claim(() -> {
             if (incrementBindId) {
                 mBgDataModel.lastBindId++;
                 mBgDataModel.lastLoadId = mApp.getModel().getLastLoadId();
             }
             mMyBindingId = mBgDataModel.lastBindId;
-            return new DisjointWorkspaceBinder(workspacePages);
-        }
+        });
     }
 
     private void bindWorkspaceAllAtOnce(boolean incrementBindId, boolean isBindSync) {
@@ -144,15 +154,11 @@ public class BaseLauncherBinder {
         ArrayList<FixedContainerItems> extraItems = new ArrayList<>();
         final int workspaceItemCount;
         synchronized (mBgDataModel) {
+            if (!claimBindingId(incrementBindId)) return;
             workspaceItems.addAll(mBgDataModel.workspaceItems);
             appWidgets.addAll(mBgDataModel.appWidgets);
             orderedScreenIds.addAll(mBgDataModel.collectWorkspaceScreens());
             mBgDataModel.extraItems.forEach(extraItems::add);
-            if (incrementBindId) {
-                mBgDataModel.lastBindId++;
-                mBgDataModel.lastLoadId = mApp.getModel().getLastLoadId();
-            }
-            mMyBindingId = mBgDataModel.lastBindId;
             workspaceItemCount = mBgDataModel.itemsIdMap.size();
         }
 
@@ -254,7 +260,7 @@ public class BaseLauncherBinder {
 
     protected void executeCallbacksTask(CallbackTask task, Executor executor) {
         executor.execute(() -> {
-            if (mMyBindingId != mBgDataModel.lastBindId) {
+            if (!mBindingToken.isCurrent() || mMyBindingId != mBgDataModel.lastBindId) {
                 Log.d(TAG, "Too many consecutive reloads, skipping obsolete data-bind");
                 return;
             }
@@ -398,6 +404,7 @@ public class BaseLauncherBinder {
             executeCallbacksTask(c -> c.finishBindingItems(currentScreenIds), pendingExecutor);
             pendingExecutor.execute(
                     () -> {
+                        if (!mBindingToken.isCurrent()) return;
                         MODEL_EXECUTOR.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT);
                         ItemInstallQueue.INSTANCE.get(mApp.getContext())
                                 .resumeModelPush(FLAG_LOADER_RUNNING);
@@ -410,7 +417,7 @@ public class BaseLauncherBinder {
          */
         private void inflateAsyncAndBind(
                 List<ItemInfo> items, @NonNull ItemInflater inflater, Executor executor) {
-            if (mMyBindingId != mBgDataModel.lastBindId) {
+            if (!mBindingToken.isCurrent() || mMyBindingId != mBgDataModel.lastBindId) {
                 Log.d(TAG, "Too many consecutive reloads, skipping obsolete view inflation");
                 return;
             }
@@ -437,7 +444,7 @@ public class BaseLauncherBinder {
 
         protected void executeCallbacksTask(CallbackTask task, Executor executor) {
             executor.execute(() -> {
-                if (mMyBindingId != mBgDataModel.lastBindId) {
+                if (!mBindingToken.isCurrent() || mMyBindingId != mBgDataModel.lastBindId) {
                     Log.d(TAG, "Too many consecutive reloads, skipping obsolete data-bind");
                     return;
                 }
@@ -538,6 +545,7 @@ public class BaseLauncherBinder {
 
             executeCallbacksTask(c -> c.finishBindingItems(mCurrentScreenIds), mUiExecutor);
             mUiExecutor.execute(() -> {
+                if (!mBindingToken.isCurrent()) return;
                 MODEL_EXECUTOR.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT);
                 ItemInstallQueue.INSTANCE.get(mApp.getContext())
                         .resumeModelPush(FLAG_LOADER_RUNNING);

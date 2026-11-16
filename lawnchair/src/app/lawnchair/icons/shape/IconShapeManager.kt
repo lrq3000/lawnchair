@@ -86,7 +86,7 @@ class IconShapeManager(private val context: Context) : SafeCloseable {
     }
 
     override fun close() {
-        TODO("Not yet implemented")
+        // The mask is immutable geometry. There are no registered listeners, jobs, or native handles owned by this facade.
     }
 
     companion object {

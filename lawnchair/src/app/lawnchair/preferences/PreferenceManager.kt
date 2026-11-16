@@ -135,7 +135,8 @@ class PreferenceManager private constructor(private val context: Context) :
     val enableGnc = BoolPref("pref_enableGnc", isGestureNavContractCompatible, recreate)
 
     override fun close() {
-        TODO("Not yet implemented")
+        // Unregister only our listener; SharedPreferences and the borrowed FontCache have independent owners.
+        sp.unregisterOnSharedPreferenceChangeListener(this)
     }
 
     init {

@@ -16,13 +16,18 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.cancel
 
-class IconOverrideRepository(private val context: Context) : SafeCloseable {
+class IconOverrideRepository @JvmOverloads constructor(
+    private val context: Context,
+    private val dao: IconOverrideDao = AppDatabase.INSTANCE.get(context).iconOverrideDao(),
+) : SafeCloseable {
 
     private val scope = MainScope() + CoroutineName("IconOverrideRepository")
-    private val dao = AppDatabase.INSTANCE.get(context).iconOverrideDao()
     private var _overridesMap = mapOf<ComponentKey, IconPickerItem>()
     val overridesMap get() = _overridesMap
+    @Volatile var overridesLoaded = false
+        private set
 
     private val updatePackageQueue = ConcurrentLinkedQueue<ComponentKey>()
 
@@ -35,6 +40,7 @@ class IconOverrideRepository(private val context: Context) : SafeCloseable {
                         keySelector = { it.target },
                         valueTransform = { it.iconPickerItem },
                     )
+                    overridesLoaded = true
                     while (updatePackageQueue.isNotEmpty()) {
                         val target = updatePackageQueue.poll() ?: continue
                         updatePackageIcons(target)
@@ -74,7 +80,9 @@ class IconOverrideRepository(private val context: Context) : SafeCloseable {
     }
 
     override fun close() {
-        TODO("Not yet implemented")
+        // This repository owns its collector scope, not the database behind its borrowed DAO.
+        scope.cancel()
+        updatePackageQueue.clear()
     }
 
     companion object {

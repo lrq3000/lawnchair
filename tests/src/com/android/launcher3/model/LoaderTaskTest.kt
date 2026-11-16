@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.UserHandle
 import android.platform.test.flag.junit.SetFlagsRule
 import android.provider.Settings
+import app.lawnchair.model.WorkspaceAvailability
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SmallTest
 import com.android.dx.mockito.inline.extended.ExtendedMockito
@@ -107,6 +108,7 @@ class LoaderTaskTest {
             .getAppWidgetInfo(anyInt())
         `when`(app.context).thenReturn(context)
         `when`(app.model).thenReturn(launcherModel)
+        `when`(launcherModel.workspaceAvailability).thenReturn(org.mockito.Mockito.mock(WorkspaceAvailability::class.java))
         `when`(launcherModel.beginLoader(any(LoaderTask::class.java))).thenReturn(transaction)
         `when`(app.iconCache).thenReturn(iconCache)
         `when`(launcherModel.modelDbController)

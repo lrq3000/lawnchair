@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="application_temporarily_unavailable">This app is temporarily unavailable. Check its storage and try again. Your shortcut is kept.</string>
+</resources>

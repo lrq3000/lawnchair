@@ -62,8 +62,9 @@ public class CacheDataUpdatedTask implements ModelUpdateTask {
                 ComponentName cn = si.getTargetComponent();
                 if (si.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
                         && isValidShortcut(si) && cn != null
+                        && !app.lawnchair.model.WorkspaceAvailability.isUnavailable(si)
                         && mPackages.contains(cn.getPackageName())) {
-                    iconCache.getTitleAndIcon(si, si.usingLowResIcon());
+                    taskController.getApp().getModel().getWorkspaceAvailability().refreshAppearance(si);
                     updatedShortcuts.add(si);
                 }
             });

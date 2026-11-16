@@ -207,6 +207,7 @@ public class RestoreDbTask {
             LauncherRestoreEventLogger restoreEventLogger = LauncherRestoreEventLogger.Companion.newInstance(context);
             task.sanitizeDB(context, controller, db, backupManager, restoreEventLogger);
             task.restoreAppWidgetIdsIfExists(context, controller, restoreEventLogger);
+            ModelDbController.rotateWorkspaceIdentity(db);
             t.commit();
             return true;
         } catch (Exception e) {

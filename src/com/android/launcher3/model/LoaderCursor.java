@@ -172,7 +172,7 @@ public class LoaderCursor extends CursorWrapper {
             itemType = getInt(mItemTypeIndex);
             container = getInt(mContainerIndex);
             id = getInt(mIdIndex);
-            serialNumber = getInt(mProfileIdIndex);
+            serialNumber = getLong(mProfileIdIndex);
             user = allUsers.get(serialNumber);
             restoreFlag = getInt(mRestoredIndex);
         }
@@ -196,7 +196,9 @@ public class LoaderCursor extends CursorWrapper {
         // Non-app shortcuts are only supported for current user.
         info.user = user;
         info.itemType = itemType;
-        info.title = getTitle();
+        info.title = itemType == Favorites.ITEM_TYPE_APPLICATION ? getString(mTitleIndex) : getTitle();
+        if (info.title == null) info.title = "";
+        info.contentDescription = mPM.getUserBadgedLabel(info.title, info.user);
         // the fallback icon
         if (!loadIcon(info)) {
             info.bitmap = mIconCache.getDefaultIcon(info.user);
@@ -217,7 +219,8 @@ public class LoaderCursor extends CursorWrapper {
 
     public IconRequestInfo<WorkspaceItemInfo> createIconRequestInfo(
             WorkspaceItemInfo wai, boolean useLowResIcon) {
-        byte[] iconBlob = itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT || restoreFlag != 0
+        byte[] iconBlob = itemType == Favorites.ITEM_TYPE_APPLICATION
+                || itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT || restoreFlag != 0
                 ? getIconBlob()
                 : null;
 

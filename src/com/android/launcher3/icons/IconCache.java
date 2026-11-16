@@ -52,6 +52,7 @@ import androidx.annotation.VisibleForTesting;
 import androidx.core.util.Pair;
 
 import com.android.launcher3.Flags;
+import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.InvariantDeviceProfile;
 import com.android.launcher3.LauncherFiles;
 import com.android.launcher3.Utilities;
@@ -192,7 +193,12 @@ public class IconCache extends BaseIconCache {
         Supplier<ItemInfoWithIcon> task;
         if (info instanceof AppInfo || info instanceof WorkspaceItemInfo) {
             task = () -> {
-                getTitleAndIcon(info, false);
+                app.lawnchair.model.WorkspaceIconLoad.run(
+                        () -> info instanceof WorkspaceItemInfo && app.lawnchair.model.WorkspaceAvailability
+                                .isUnavailable((WorkspaceItemInfo) info),
+                        () -> LauncherAppState.getInstance(mContext).getModel().getWorkspaceAvailability()
+                                .restoreUnavailableAppearance((WorkspaceItemInfo) info),
+                        () -> getTitleAndIcon(info, false));
                 return info;
             };
         } else if (info instanceof PackageItemInfo pii) {

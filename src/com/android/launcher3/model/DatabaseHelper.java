@@ -113,6 +113,7 @@ public class DatabaseHelper extends NoLocaleSQLiteHelper implements
         mMaxItemId = 1;
 
         addTableToDb(db, getDefaultUserSerial(), false /* optional */);
+        ModelDbController.rotateWorkspaceIdentity(db);
 
         // Fresh and clean launcher DB.
         mMaxItemId = initializeMaxItemId(db);

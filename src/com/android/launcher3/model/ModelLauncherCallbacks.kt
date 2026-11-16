@@ -93,8 +93,9 @@ class ModelLauncherCallbacks(private var taskExecutor: Consumer<ModelUpdateTask>
     }
 
     fun onPackagesRemoved(user: UserHandle, packages: List<String>) {
-        FileLog.d(TAG, "package removed received " + TextUtils.join(",", packages))
-        taskExecutor.accept(PackageUpdatedTask(OP_REMOVE, user, *packages.toTypedArray()))
+        // Legacy callers inferred removal from a negative lookup; only onPackageRemoved is an uninstall event.
+        FileLog.d(TAG, "package revalidation requested " + TextUtils.join(",", packages))
+        taskExecutor.accept(PackageUpdatedTask(OP_UPDATE, user, *packages.toTypedArray()))
     }
 
     companion object {
