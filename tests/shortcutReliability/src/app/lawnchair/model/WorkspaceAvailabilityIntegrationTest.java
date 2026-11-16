@@ -460,6 +460,11 @@ public class WorkspaceAvailabilityIntegrationTest {
             insert(92, healthyIntent, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
             load(92, healthy);
             BgDataModel.Callbacks current = new BgDataModel.Callbacks() {
+                @Override public com.android.launcher3.util.IntSet getPagesToBindSynchronously(com.android.launcher3.util.IntArray pages) {
+                    com.android.launcher3.util.IntSet visible = new com.android.launcher3.util.IntSet();
+                    visible.add(7);
+                    return visible;
+                }
                 @Override public void bindItems(java.util.List<ItemInfo> items, boolean animate) {
                     for (ItemInfo item : items) bound.add(item.id);
                 }
@@ -482,7 +487,9 @@ public class WorkspaceAvailabilityIntegrationTest {
 
     private ItemInfo loadItem(int id, BgDataModel model) {
         UserManagerState users = new UserManagerState();
-        users.allUsers.put(mSerial, Process.myUserHandle());
+        // Match LoaderTask's real user snapshot, including both quiet-mode maps, rather than only supplying cursor identities.
+        users.init(UserCache.INSTANCE.get(mContext), mContext.getSystemService(android.os.UserManager.class));
+        assertEquals(Process.myUserHandle(), users.allUsers.get(mSerial));
         try (LoaderCursor c = new LoaderCursor(mDb.query(Favorites.TABLE_NAME, null,
                 Favorites._ID + "=?", new String[] {Integer.toString(id)}, null), mApp, users,
                 PackageManagerHelper.INSTANCE.get(mContext), null)) {

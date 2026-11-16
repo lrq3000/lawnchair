@@ -57,7 +57,7 @@ class DeviceProfileOverrides(context: Context) : SafeCloseable {
 
     fun getTextFactors() = TextFactors(preferenceManager2)
     override fun close() {
-        TODO("Not yet implemented")
+        // Only immutable grid metadata and borrowed preference managers are retained; their owners close them, not this facade.
     }
 
     data class DBGridInfo(
