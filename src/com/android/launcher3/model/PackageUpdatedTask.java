@@ -15,6 +15,9 @@
  */
 package com.android.launcher3.model;
 
+import app.lawnchair.model.WorkspaceAvailability;
+import app.lawnchair.model.WorkspaceAvailabilityStore;
+
 import static com.android.launcher3.model.BgDataModel.Callbacks.FLAG_PRIVATE_PROFILE_QUIET_MODE_ENABLED;
 import static com.android.launcher3.model.BgDataModel.Callbacks.FLAG_QUIET_MODE_ENABLED;
 import static com.android.launcher3.model.BgDataModel.Callbacks.FLAG_WORK_PROFILE_QUIET_MODE_ENABLED;
@@ -65,6 +68,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -100,6 +104,8 @@ public class PackageUpdatedTask implements ModelUpdateTask {
 
     @NonNull
     private final String[] mPackages;
+    private boolean mAvailabilityPrepared;
+    private Set<Integer> mConfirmedRemovalIds = Collections.emptySet();
 
     public PackageUpdatedTask(final int op, @NonNull final UserHandle user,
                               @NonNull final String... packages) {
@@ -108,12 +114,26 @@ public class PackageUpdatedTask implements ModelUpdateTask {
         mPackages = packages;
     }
 
+    public boolean isConfirmedRemoval() {
+        return mOp == OP_REMOVE;
+    }
+
+    public void prepareAvailability(LauncherAppState app) {
+        if (!mAvailabilityPrepared) {
+            mConfirmedRemovalIds = app.getModel().getWorkspaceAvailability().recordEvent(mOp, mUser, mPackages);
+            mAvailabilityPrepared = true;
+        }
+    }
+
     @Override
     public void execute(@NonNull ModelTaskController taskController, @NonNull BgDataModel dataModel,
                         @NonNull AllAppsList appsList) {
         final LauncherAppState app = taskController.getApp();
         final Context context = app.getContext();
         final IconCache iconCache = app.getIconCache();
+        prepareAvailability(app);
+        final WorkspaceAvailability availability = app.getModel().getWorkspaceAvailability();
+        availability.applyPendingRemovals(dataModel);
 
         final String[] packages = mPackages;
         final int N = packages.length;
@@ -253,6 +273,33 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                     ComponentName cn = si.getTargetComponent();
                     if (cn != null && matcher.test(si)) {
                         String packageName = cn.getPackageName();
+
+                        if (WorkspaceAvailability.isOrdinaryApplication(si)) {
+                            if (mOp == OP_REMOVE) return; // Fingerprinted old favorites were journaled/deleted before this task; never broadly delete a new installation.
+                            if (mOp == OP_UNAVAILABLE) {
+                                si.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                                forceKeepShortcuts.add(si.id);
+                                updatedWorkspaceItems.add(si);
+                                return;
+                            }
+                            if (isNewApkAvailable) {
+                                int decision = availability.evaluate(si);
+                                if (decision == WorkspaceAvailabilityStore.KEEP) {
+                                    si.runtimeStatusFlags |= WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                                    forceKeepShortcuts.add(si.id);
+                                    updatedWorkspaceItems.add(si);
+                                    return;
+                                }
+                                if (decision == WorkspaceAvailabilityStore.AVAILABLE) {
+                                    // The original component resolved: update this object/row, not a fallback activity or installation queue entry.
+                                    si.runtimeStatusFlags &= ~WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE;
+                                    availability.refreshAppearance(si);
+                                    forceKeepShortcuts.add(si.id);
+                                    updatedWorkspaceItems.add(si);
+                                    return;
+                                }
+                            }
+                        }
 
                         if (si.hasStatusFlag(WorkspaceItemInfo.FLAG_SUPPORTS_WEB_UI)) {
                             forceKeepShortcuts.add(si.id);
@@ -439,7 +486,15 @@ public class PackageUpdatedTask implements ModelUpdateTask {
             Predicate<ItemInfo> removeMatch =
                     ItemInfoMatcher.ofPackages(removedPackages, mUser)
                             .or(ItemInfoMatcher.ofComponents(removedComponents, mUser))
-                            .and(ItemInfoMatcher.ofItemIds(forceKeepShortcuts).negate());
+                            .and(ItemInfoMatcher.ofItemIds(forceKeepShortcuts).negate())
+                            .and(item -> mOp != OP_REMOVE || !WorkspaceAvailability.isOrdinaryApplication(item));
+            if (mOp == OP_REMOVE && !mConfirmedRemovalIds.isEmpty()) {
+                Set<Integer> deletedIds = new HashSet<>(mConfirmedRemovalIds);
+                deletedIds.removeIf(availability::hasFavorite);
+                // Also bind removals already applied before the task or while its loader was running.
+                taskController.scheduleCallbackTask(callbacks -> callbacks.bindWorkspaceComponentsRemoved(
+                        item -> item != null && mUser.equals(item.user) && deletedIds.contains(item.id)));
+            }
             taskController.deleteAndBindComponentsRemoved(removeMatch,
                     "removed because the corresponding package or component is removed. "
                             + "mOp=" + mOp + " removedPackages=" + removedPackages.stream().collect(
@@ -467,7 +522,9 @@ public class PackageUpdatedTask implements ModelUpdateTask {
                 LawndeckManager deckManager = new LawndeckManager(context);
                 ModelWriter modelWriter = taskController.getModelWriter();
                 for (int i = 0; i < N; i++) {
-                    deckManager.addNewlyInstalledApp(packages[i], mUser, modelWriter, dataModel);
+                    if (!availability.hasWorkspaceApplication(packages[i], mUser)) {
+                        deckManager.addNewlyInstalledApp(packages[i], mUser, modelWriter, dataModel);
+                    }
                 }
             }
         }

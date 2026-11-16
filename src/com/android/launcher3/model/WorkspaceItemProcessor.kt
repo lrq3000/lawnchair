@@ -26,6 +26,7 @@ import android.graphics.Point
 import android.text.TextUtils
 import android.util.Log
 import android.util.LongSparseArray
+import app.lawnchair.model.WorkspaceAvailabilityStore
 import com.android.launcher3.Flags
 import com.android.launcher3.InvariantDeviceProfile
 import com.android.launcher3.LauncherAppState
@@ -153,10 +154,18 @@ class WorkspaceItemProcessor(
             c.markDeleted("No target package for item id=${c.id}", RestoreError.MISSING_INFO)
             return
         }
-        var validTarget = launcherApps.isPackageEnabled(targetPkg, c.user)
+        val archivedApplication = Utilities.ATLEAST_V && Flags.enableSupportForArchiving() && pmHelper.isAppArchivedForUser(targetPkg, c.user)
+        val ordinaryApplication = c.itemType == Favorites.ITEM_TYPE_APPLICATION && c.restoreFlag == 0 && cn != null && !archivedApplication
+        if (ordinaryApplication && app.model.workspaceAvailability.evaluate(c, intent) == WorkspaceAvailabilityStore.KEEP) {
+            // Missing package information is not uninstall evidence. Occupy the original cell/folder slot and retain the exact saved intent.
+            allowMissingTarget = true
+            disabledState = disabledState or WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE
+            pendingPackages.add(PackageUserKey(targetPkg, c.user))
+        }
+        var validTarget = !allowMissingTarget && launcherApps.isPackageEnabled(targetPkg, c.user)
 
         // If it's a deep shortcut, we'll use pinned shortcuts to restore it
-        if (cn != null && validTarget && (c.itemType != Favorites.ITEM_TYPE_DEEP_SHORTCUT)) {
+        if (cn != null && validTarget && !allowMissingTarget && (c.itemType != Favorites.ITEM_TYPE_DEEP_SHORTCUT)) {
             // If the apk is present and the shortcut points to a specific component.
 
             // If the component is already present
@@ -184,7 +193,7 @@ class WorkspaceItemProcessor(
                 }
             }
         }
-        if (intent.`package` == null) {
+        if (!ordinaryApplication && intent.`package` == null) {
             intent.`package` = targetPkg
         }
         // else if cn == null => can't infer much, leave it
@@ -194,6 +203,9 @@ class WorkspaceItemProcessor(
                 // Points to a valid app (superset of cn != null) but the apk
                 // is not available.
                 when {
+                    allowMissingTarget -> {
+                        // The centralized durable policy already established unresolved availability, independently of boot completion.
+                    }
                     c.restoreFlag != 0 -> {
                         // Package is not yet available but might be
                         // installed later.
@@ -260,6 +272,7 @@ class WorkspaceItemProcessor(
                 // Already verified above that user is same as default user
                 info = c.getRestoredItemInfo(intent)
             }
+            ordinaryApplication && allowMissingTarget -> info = c.loadSimpleWorkspaceItem()
             c.itemType == Favorites.ITEM_TYPE_APPLICATION ->
                 info = c.getAppShortcutInfo(intent, allowMissingTarget, useLowResIcon, false)
             c.itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT -> {
@@ -315,13 +328,14 @@ class WorkspaceItemProcessor(
             }
         }
         if (info != null) {
-            if (info.itemType != Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
+            if (info.itemType != Favorites.ITEM_TYPE_DEEP_SHORTCUT && !(ordinaryApplication && allowMissingTarget)) {
                 // Skip deep shortcuts; their title and icons have already been
                 // loaded above.
                 iconRequestInfos.add(c.createIconRequestInfo(info, useLowResIcon))
             }
             c.applyCommonProperties(info)
             info.intent = intent
+            if (ordinaryApplication && allowMissingTarget) app.model.workspaceAvailability.loadCachedAppearance(info)
             info.rank = c.rank
             info.spanX = 1
             info.spanY = 1

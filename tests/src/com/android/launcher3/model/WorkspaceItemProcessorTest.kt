@@ -161,6 +161,9 @@ class WorkspaceItemProcessorTest {
             }
 
         mockUserManagerState = mock<UserManagerState>()
+        val launcherModel = mock<com.android.launcher3.LauncherModel>()
+        whenever(mockAppState.model).thenReturn(launcherModel)
+        whenever(launcherModel.workspaceAvailability).thenReturn(mock<app.lawnchair.model.WorkspaceAvailability>())
         mockWidgetInflater = mock<WidgetInflater>()
         mKeyToPinnedShortcutsMap = mutableMapOf()
         mInstallingPkgs = hashMapOf()

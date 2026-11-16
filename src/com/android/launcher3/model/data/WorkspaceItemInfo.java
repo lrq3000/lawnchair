@@ -139,12 +139,17 @@ public class WorkspaceItemInfo extends ItemInfoWithIcon {
     @Override
     public void onAddToDatabase(@NonNull ContentWriter writer) {
         super.onAddToDatabase(writer);
-        writer.put(Favorites.TITLE, title)
-                .put(Favorites.INTENT, getIntent())
+        boolean ordinaryApplication = itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
+                && status == DEFAULT && !isArchived();
+        boolean unavailableApplication = ordinaryApplication && (runtimeStatusFlags & FLAG_DISABLED_NOT_AVAILABLE) != 0;
+        if (!unavailableApplication && (!ordinaryApplication || !android.text.TextUtils.isEmpty(title))) {
+            writer.put(Favorites.TITLE, title);
+        }
+        writer.put(Favorites.INTENT, getIntent())
                 .put(Favorites.OPTIONS, options)
                 .put(Favorites.RESTORED, status);
 
-        if (!usingLowResIcon()) {
+        if (!unavailableApplication && !usingLowResIcon()) {
             writer.putIcon(bitmap, user);
         }
     }

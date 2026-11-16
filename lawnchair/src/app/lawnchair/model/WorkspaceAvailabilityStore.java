@@ -29,6 +29,7 @@ public final class WorkspaceAvailabilityStore {
     private boolean mWriteFailed;
 
     private static final class PackageState {
+        boolean known;
         boolean external;
         boolean recovering;
         String uuid;
@@ -97,7 +98,7 @@ public final class WorkspaceAvailabilityStore {
             }
             return AVAILABLE;
         }
-        if (state != null && !state.external && !state.recovering
+        if (state != null && state.known && !state.external && !state.recovering
                 && !mRecovering.containsKey(row.identity())) return REMOVE;
         if (!mRecovering.containsKey(row.identity())) {
             mRecovering.put(row.identity(), row);
@@ -110,9 +111,10 @@ public final class WorkspaceAvailabilityStore {
     public void observe(long serial, String pkg, boolean external, String uuid, String publicUuid) {
         String key = packageKey(serial, pkg);
         PackageState state = mPackages.get(key);
-        if (state != null && state.external == external && Objects.equals(state.uuid, uuid)
+        if (state != null && state.known && state.external == external && Objects.equals(state.uuid, uuid)
                 && Objects.equals(state.publicUuid, publicUuid)) return;
         if (state == null) state = new PackageState();
+        state.known = true;
         state.external = external;
         state.uuid = uuid;
         state.publicUuid = publicUuid;
@@ -131,15 +133,26 @@ public final class WorkspaceAvailabilityStore {
         save();
     }
 
+    public void availabilityEvent(long serial, String pkg) {
+        PackageState state = mPackages.computeIfAbsent(packageKey(serial, pkg), k -> new PackageState());
+        state.generation++;
+        save();
+    }
+
     /** Journal exact old favorites before deleting them; a later installation cannot inherit these row fingerprints. */
     public void uninstall(long serial, String pkg, List<Row> rows) {
         PackageState state = mPackages.computeIfAbsent(packageKey(serial, pkg), k -> new PackageState());
         state.generation++;
         state.recovering = false;
+        state.known = false;
+        state.external = false;
+        state.uuid = null;
+        state.publicUuid = null;
+        mRecovering.entrySet().removeIf(entry -> entry.getValue().serial == serial
+                && entry.getValue().packageName.equals(pkg));
         for (Row row : rows) {
             if (row.serial == serial && row.packageName.equals(pkg)) {
                 mRemovals.put(row.fingerprint(), row);
-                mRecovering.remove(row.identity());
             }
         }
         save();
@@ -188,6 +201,7 @@ public final class WorkspaceAvailabilityStore {
             for (Map.Entry<String, PackageState> entry : mPackages.entrySet()) {
                 PackageState state = entry.getValue();
                 out.writeUTF(entry.getKey());
+                out.writeBoolean(state.known);
                 out.writeBoolean(state.external);
                 out.writeBoolean(state.recovering);
                 writeNullable(out, state.uuid);
@@ -221,6 +235,7 @@ public final class WorkspaceAvailabilityStore {
         for (int i = 0; i < size; i++) {
             String key = in.readUTF();
             PackageState state = new PackageState();
+            state.known = in.readBoolean();
             state.external = in.readBoolean();
             state.recovering = in.readBoolean();
             state.uuid = readNullable(in);

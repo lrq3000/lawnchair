@@ -84,6 +84,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -132,6 +133,12 @@ public class LauncherModel implements InstallSessionTracker.Callback {
     // need to do a requery. This is only ever touched from the loader thread.
     private boolean mModelLoaded;
     private boolean mModelDestroyed = false;
+    private final app.lawnchair.model.WorkspaceAvailability mWorkspaceAvailability;
+    private final ConcurrentLinkedQueue<PackageUpdatedTask> mPendingPackageEvents = new ConcurrentLinkedQueue<>();
+    private volatile boolean mAvailabilityForeground;
+    private long mAvailabilityRetryDelay = 1000;
+    private final Runnable mAvailabilityRetry = this::revalidateWorkspaceAvailability;
+    private final Runnable mAvailabilityRequest = this::runAvailabilityCheck;
 
     public boolean isModelLoaded() {
         synchronized (mLock) {
@@ -176,6 +183,7 @@ public class LauncherModel implements InstallSessionTracker.Callback {
         mApp = app;
         mPmHelper = pmHelper;
         mModelDbController = new ModelDbController(context);
+        mWorkspaceAvailability = new app.lawnchair.model.WorkspaceAvailability(app, mModelDbController);
         mBgAllAppsList = new AllAppsList(iconCache, appFilter);
         mModelDelegate = ModelDelegate.newInstance(context, app, mPmHelper, mBgAllAppsList,
                 mBgDataModel, isPrimaryInstance);
@@ -188,6 +196,45 @@ public class LauncherModel implements InstallSessionTracker.Callback {
 
     public ModelDbController getModelDbController() {
         return mModelDbController;
+    }
+
+    public app.lawnchair.model.WorkspaceAvailability getWorkspaceAvailability() {
+        return mWorkspaceAvailability;
+    }
+
+    /** Drain consequential package events before either the unloaded-task discard gate or a loader bind. Model thread only. */
+    public void reconcilePendingPackageEvents() {
+        PackageUpdatedTask event;
+        while ((event = mPendingPackageEvents.peek()) != null) {
+            event.prepareAvailability(mApp);
+            mPendingPackageEvents.poll();
+        }
+        mWorkspaceAvailability.applyPendingRemovals(mBgDataModel);
+    }
+
+    public void revalidateWorkspaceAvailability() {
+        if (mModelDestroyed) return;
+        MODEL_EXECUTOR.getHandler().removeCallbacks(mAvailabilityRequest);
+        MODEL_EXECUTOR.post(mAvailabilityRequest);
+    }
+
+    private void runAvailabilityCheck() {
+        enqueueModelUpdateTask((controller, data, apps) -> {
+            controller.bindUpdatedWorkspaceItems(mWorkspaceAvailability.revalidate(data));
+            MODEL_EXECUTOR.getHandler().removeCallbacks(mAvailabilityRetry);
+            if (mAvailabilityForeground && mWorkspaceAvailability.hasRecovery(data)) {
+                // Retry only while visible. Exhausting time is never deletion evidence; callbacks and resume restart the query path.
+                MODEL_EXECUTOR.getHandler().postDelayed(mAvailabilityRetry, mAvailabilityRetryDelay);
+                mAvailabilityRetryDelay = Math.min(30000, mAvailabilityRetryDelay * 2);
+            } else {
+                mAvailabilityRetryDelay = 1000;
+            }
+        });
+    }
+
+    public void onWorkspaceBackground() {
+        mAvailabilityForeground = false;
+        MODEL_EXECUTOR.getHandler().removeCallbacks(mAvailabilityRetry);
     }
 
     public ModelLauncherCallbacks newModelCallbacks() {
@@ -242,6 +289,8 @@ public class LauncherModel implements InstallSessionTracker.Callback {
      */
     public void destroy() {
         mModelDestroyed = true;
+        onWorkspaceBackground();
+        MODEL_EXECUTOR.getHandler().removeCallbacks(mAvailabilityRequest);
         MODEL_EXECUTOR.execute(mModelDelegate::destroy);
     }
 
@@ -578,6 +627,7 @@ public class LauncherModel implements InstallSessionTracker.Callback {
                 }
                 mIsLoaderTaskRunning = false;
             }
+            revalidateWorkspaceAvailability();
         }
     }
 
@@ -593,6 +643,8 @@ public class LauncherModel implements InstallSessionTracker.Callback {
      * use partial updates similar to {@link UserCache}
      */
     public void validateModelDataOnResume() {
+        mAvailabilityForeground = true;
+        revalidateWorkspaceAvailability();
         MODEL_EXECUTOR.getHandler().removeCallbacks(mDataValidationCheck);
         MODEL_EXECUTOR.post(mDataValidationCheck);
     }
@@ -623,7 +675,18 @@ public class LauncherModel implements InstallSessionTracker.Callback {
         if (mModelDestroyed) {
             return;
         }
+        if (task instanceof PackageUpdatedTask) {
+            PackageUpdatedTask event = (PackageUpdatedTask) task;
+            mPendingPackageEvents.add(event);
+            boolean interruptLoad;
+            synchronized (mLock) {
+                interruptLoad = event.isConfirmedRemoval() && mIsLoaderTaskRunning;
+            }
+            // An uninstall arriving after a loader checkpoint invalidates that load instead of allowing a stale final bind.
+            if (interruptLoad) forceReload();
+        }
         MODEL_EXECUTOR.execute(() -> {
+            reconcilePendingPackageEvents();
             if (!isModelLoaded()) {
                 // Loader has not yet run.
                 return;

@@ -263,6 +263,8 @@ public class LoaderTask implements Runnable {
             }
 
             verifyNotStopped();
+            mApp.getModel().reconcilePendingPackageEvents();
+            verifyNotStopped();
             mLauncherBinder.bindWorkspace(true /* incrementBindId */, /* isBindSync= */ false);
             logASplit("bindWorkspace");
 
@@ -436,6 +438,8 @@ public class LoaderTask implements Runnable {
         dbController.tryMigrateDB(restoreEventLogger);
         Log.d(TAG, "loadWorkspace: loading default favorites");
         dbController.loadDefaultFavoritesIfNecessary();
+        mApp.getModel().reconcilePendingPackageEvents();
+        mApp.getModel().getWorkspaceAvailability().beginLoad();
 
         synchronized (mBgDataModel) {
             mBgDataModel.clear();
@@ -502,6 +506,7 @@ public class LoaderTask implements Runnable {
             processAppPairItems();
 
             c.commitRestoredItems();
+            mApp.getModel().getWorkspaceAvailability().cacheLoadedItems(mBgDataModel);
         }
     }
 
@@ -588,17 +593,21 @@ public class LoaderTask implements Runnable {
             folder.getContents().sort(Folder.ITEM_POS_COMPARATOR);
             verifiers.forEach(verifier -> verifier.setFolderInfo(folder));
             int size = folder.getContents().size();
+            boolean hasUnavailableChild = folder.getContents().stream().anyMatch(item ->
+                    item instanceof WorkspaceItemInfo && app.lawnchair.model.WorkspaceAvailability
+                            .isUnavailable((WorkspaceItemInfo) item));
 
             // Update ranks here to ensure there are no gaps caused by removed folder items.
             // Ranks are the source of truth for folder items, so cellX and cellY can be
             // ignored for now. Database will be updated once user manually modifies folder.
             for (int rank = 0; rank < size; ++rank) {
                 ItemInfo info = folder.getContents().get(rank);
-                info.rank = rank;
+                if (!hasUnavailableChild) info.rank = rank;
 
                 if (info instanceof WorkspaceItemInfo wii
                         && wii.usingLowResIcon()
                         && wii.itemType == Favorites.ITEM_TYPE_APPLICATION
+                        && !app.lawnchair.model.WorkspaceAvailability.isUnavailable(wii)
                         && verifiers.stream().anyMatch(it -> it.isItemInPreview(info.rank))) {
                     mIconCache.getTitleAndIcon(wii, false);
                 } else if (info instanceof AppPairInfo api) {
@@ -688,13 +697,7 @@ public class LoaderTask implements Runnable {
         // Update pinned state of model shortcuts
         mBgDataModel.updateShortcutPinnedState(context);
 
-        if (!Utilities.isBootCompleted() && !mPendingPackages.isEmpty()) {
-            context.registerReceiver(
-                    new SdCardAvailableReceiver(mApp, mPendingPackages),
-                    new IntentFilter(Intent.ACTION_BOOT_COMPLETED),
-                    null,
-                    MODEL_EXECUTOR.getHandler());
-        }
+        // The model owner observes boot and storage for its whole lifetime, not a one-shot boot-readiness inference.
     }
 
     private List<LauncherActivityInfo> loadAllApps() {

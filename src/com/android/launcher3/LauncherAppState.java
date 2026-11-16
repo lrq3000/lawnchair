@@ -136,6 +136,23 @@ public class LauncherAppState implements SafeCloseable {
 
         mOnTerminateCallback.add(() -> mContext.unregisterReceiver(modelChangeReceiver));
 
+        SimpleBroadcastReceiver availabilityReceiver = new SimpleBroadcastReceiver(
+                intent -> mModel.revalidateWorkspaceAvailability());
+        availabilityReceiver.register(mContext, Intent.ACTION_BOOT_COMPLETED);
+        mOnTerminateCallback.add(() -> availabilityReceiver.unregisterReceiverSafely(mContext));
+        SimpleBroadcastReceiver mediaReceiver = new SimpleBroadcastReceiver(
+                intent -> mModel.revalidateWorkspaceAvailability());
+        android.content.IntentFilter mediaFilter = new android.content.IntentFilter();
+        mediaFilter.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        mediaFilter.addAction(Intent.ACTION_MEDIA_UNMOUNTED);
+        mediaFilter.addAction(Intent.ACTION_MEDIA_CHECKING);
+        mediaFilter.addAction(Intent.ACTION_MEDIA_REMOVED);
+        mediaFilter.addAction(Intent.ACTION_MEDIA_BAD_REMOVAL);
+        mediaFilter.addDataScheme("file");
+        androidx.core.content.ContextCompat.registerReceiver(mContext, mediaReceiver, mediaFilter,
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+        mOnTerminateCallback.add(() -> mediaReceiver.unregisterReceiverSafely(mContext));
+
         SafeCloseable userChangeListener = UserCache.INSTANCE.get(mContext)
                 .addUserEventListener(mModel::onUserEvent);
         mOnTerminateCallback.add(userChangeListener::close);

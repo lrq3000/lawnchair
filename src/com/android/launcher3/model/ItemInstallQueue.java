@@ -112,6 +112,10 @@ public class ItemInstallQueue implements SafeCloseable {
 
     @WorkerThread
     private void addToQueue(PendingInstallShortcutInfo info) {
+        if (info.itemType == Favorites.ITEM_TYPE_APPLICATION && LauncherAppState.getInstance(mContext)
+                .getModel().getWorkspaceAvailability().hasWorkspaceApplication(info.intent.getPackage(), info.user)) {
+            return; // Storage recovery updates retained favorites; it is not a new installation.
+        }
         ensureQueueLoaded();
         if (!mItems.contains(info)) {
             mItems.add(info);
@@ -132,6 +136,9 @@ public class ItemInstallQueue implements SafeCloseable {
         }
 
         List<Pair<ItemInfo, Object>> installQueue = mItems.stream()
+                .filter(info -> info.itemType != Favorites.ITEM_TYPE_APPLICATION
+                        || !launcher.getModel().getWorkspaceAvailability()
+                                .hasWorkspaceApplication(info.intent.getPackage(), info.user))
                 .map(info -> info.getItemInfo(mContext))
                 .collect(Collectors.toList());
 

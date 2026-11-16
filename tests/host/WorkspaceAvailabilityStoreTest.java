@@ -25,6 +25,8 @@ public final class WorkspaceAvailabilityStoreTest {
         unreadableMetadataFailsSafe();
         failedAtomicWriteRetainsPreviousState();
         storageMappingIsNotInvented();
+        availabilityEventIsDurableWithoutKnownPackage();
+        uninstallRetiresRecoveryForPreviouslyDeletedRows();
         System.out.println("PASS " + count + " production availability policy/store tests");
     }
 
@@ -148,6 +150,9 @@ public final class WorkspaceAvailabilityStoreTest {
         store.observe(10, "pkg", false, null, null);
         // Header is magic followed by schema version; a future schema cannot justify deletion.
         disk.bytes[7] = 99;
+        java.util.zip.CRC32 checksum = new java.util.zip.CRC32();
+        checksum.update(disk.bytes, 0, disk.bytes.length - 8);
+        java.nio.ByteBuffer.wrap(disk.bytes, disk.bytes.length - 8, 8).putLong(checksum.getValue());
         store = new WorkspaceAvailabilityStore(disk);
         equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
         count++;
@@ -181,6 +186,27 @@ public final class WorkspaceAvailabilityStoreTest {
         store.observe(10, "pkg", true, "aabb-ccdd", "aabb-ccdd");
         equal("aabb-ccdd", store.publicVolume(10, "pkg"));
         equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        count++;
+    }
+
+    private static void availabilityEventIsDurableWithoutKnownPackage() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        store.availabilityEvent(10, "pkg");
+        check(disk.bytes != null, "An availability event must be persisted even before the model first loads");
+        store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        count++;
+    }
+
+    private static void uninstallRetiresRecoveryForPreviouslyDeletedRows() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        store.evaluate(row(1, 10, "Main"), false);
+        // A user may have removed this unavailable icon before the real uninstall arrives.
+        store.uninstall(10, "pkg", Collections.emptyList());
+        store = new WorkspaceAvailabilityStore(disk);
+        check(!store.isRecovering(10, "pkg"), "Confirmed uninstall must retire recovery even for rows already removed by the user");
         count++;
     }
 

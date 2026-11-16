@@ -84,6 +84,7 @@ import com.android.launcher3.widget.LauncherWidgetHolder;
 
 import org.xmlpull.v1.XmlPullParser;
 
+import java.io.File;
 import java.io.InputStream;
 import java.io.StringReader;
 
@@ -99,14 +100,50 @@ public class ModelDbController {
     private static final String TAG = "LauncherProvider";
 
     private static final String EMPTY_DATABASE_CREATED = "EMPTY_DATABASE_CREATED";
+    private static final String CREATE_AVAILABILITY_IDENTITY = "CREATE TABLE IF NOT EXISTS workspace_availability_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), token TEXT NOT NULL)";
     public static final String EXTRA_DB_NAME = "db_name";
 
     protected DatabaseHelper mOpenHelper;
 
     private final Context mContext;
+    private final String mUnverifiedWorkspaceIdentity = "unverified:" + java.util.UUID.randomUUID();
 
     public ModelDbController(Context context) {
         mContext = context;
+    }
+
+    /** A non-destructive, database-local identity prevents journal entries matching reused IDs in a recreated layout. */
+    public synchronized String getWorkspaceIdentity() {
+        createDbIfNotExists();
+        SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        try {
+            db.execSQL(CREATE_AVAILABILITY_IDENTITY);
+            db.execSQL("INSERT OR IGNORE INTO workspace_availability_identity(singleton, token) VALUES(1, ?)",
+                    new Object[] {java.util.UUID.randomUUID().toString()});
+            try (Cursor cursor = db.rawQuery("SELECT token FROM workspace_availability_identity WHERE singleton=1", null)) {
+                if (cursor.moveToFirst()) {
+                    String token = cursor.getString(0);
+                    if (token != null && java.util.UUID.fromString(token).toString().equals(token)) {
+                        return mOpenHelper.getDatabaseName() + ":" + token;
+                    }
+                }
+            }
+        } catch (android.database.sqlite.SQLiteException | IllegalArgumentException e) {
+            Log.e(TAG, "Availability identity unreadable; using unknown history without resetting favorites", e);
+        }
+        return mUnverifiedWorkspaceIdentity;
+    }
+
+    /** A new/restored layout must not inherit another installation's pending deletes or device-specific storage associations. */
+    public static void rotateWorkspaceIdentity(SQLiteDatabase db) {
+        try {
+            db.execSQL(CREATE_AVAILABILITY_IDENTITY);
+            db.execSQL("INSERT OR REPLACE INTO workspace_availability_identity(singleton, token) VALUES(1, ?)",
+                    new Object[] {java.util.UUID.randomUUID().toString()});
+        } catch (android.database.sqlite.SQLiteException e) {
+            // Optional metadata must never make the existing restore machinery fall back to an empty favorites database.
+            Log.e(TAG, "Could not renew availability identity", e);
+        }
     }
 
     private synchronized void createDbIfNotExists() {
@@ -119,6 +156,8 @@ public class ModelDbController {
     protected DatabaseHelper createDatabaseHelper(boolean forMigration) {
         boolean isSandbox = mContext instanceof SandboxContext;
         String dbName = isSandbox ? null : InvariantDeviceProfile.INSTANCE.get(mContext).dbFile;
+        File restoredDb = mContext.getDatabasePath(app.lawnchair.backup.LawnchairBackup.RESTORED_DB_FILE_NAME);
+        boolean restoringLocalBackup = !isSandbox && restoredDb.exists();
 
         try {
             if (!forMigration && dbName != null) {
@@ -151,6 +190,7 @@ public class ModelDbController {
                 databaseHelper.getReadableDatabase(), Favorites.HYBRID_HOTSEAT_BACKUP_TABLE);
 
         databaseHelper.initIds();
+        if (restoringLocalBackup && !restoredDb.exists()) rotateWorkspaceIdentity(databaseHelper.getWritableDatabase());
         return databaseHelper;
     }
 

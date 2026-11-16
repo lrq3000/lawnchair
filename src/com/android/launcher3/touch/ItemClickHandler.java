@@ -38,6 +38,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Toast;
+import com.android.launcher3.LauncherAppState;
 
 import com.android.launcher3.BubbleTextView;
 import com.android.launcher3.BuildConfig;
@@ -309,6 +310,11 @@ public class ItemClickHandler {
             }
             // Otherwise just use a generic error message.
             int error = R.string.activity_not_available;
+            if (shortcut.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
+                    && (disabledFlags & WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE) != 0) {
+                LauncherAppState.getInstance(context).getModel().revalidateWorkspaceAvailability();
+                error = R.string.application_temporarily_unavailable;
+            }
             if ((shortcut.runtimeStatusFlags & FLAG_DISABLED_SAFEMODE) != 0) {
                 error = R.string.safemode_shortcut_error;
             } else if ((shortcut.runtimeStatusFlags & FLAG_DISABLED_BY_PUBLISHER) != 0

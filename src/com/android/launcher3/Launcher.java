@@ -1336,6 +1336,7 @@ public class Launcher extends StatefulActivity<LauncherState>
 
     @Override
     protected void onPause() {
+        mModel.onWorkspaceBackground();
         // Ensure that items added to Launcher are queued until Launcher returns
         ItemInstallQueue.INSTANCE.get(this).pauseModelPush(FLAG_ACTIVITY_PAUSED);
 
