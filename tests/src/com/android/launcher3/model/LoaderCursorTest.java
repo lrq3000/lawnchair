@@ -169,6 +169,41 @@ public class LoaderCursorTest {
         assertEquals(ITEM_TYPE_DEEP_SHORTCUT, info.itemType);
     }
 
+    /** A completed boot must not delete a first-migration application whose APK is absent. */
+    @Test
+    public void bootCompleted_missingApplication_keepsRealModelIdentityAndIntent() throws Exception {
+        Intent original = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(new ComponentName("missing.external.app", "missing.external.app.Main"))
+                .putExtra("original-extra", "keep");
+        mCursor.newRow().add(_ID, 73).add(PROFILE_ID, 0)
+                .add(ITEM_TYPE, ITEM_TYPE_APPLICATION).add(TITLE, "Saved custom label")
+                .add(CONTAINER, CONTAINER_DESKTOP).add(SCREEN, 7).add(CELLX, 1).add(CELLY, 2)
+                .add(RANK, 4).add(INTENT, original.toUri(0));
+        assertTrue(mLoaderCursor.moveToNext());
+        BgDataModel model = new BgDataModel();
+        UserManagerState users = new UserManagerState();
+        users.allUsers.put(0, Process.myUserHandle());
+        Executors.MODEL_EXECUTOR.submit(() -> {
+            new WorkspaceItemProcessor(mLoaderCursor, null,
+                    com.android.launcher3.pm.UserCache.INSTANCE.get(mContext), users,
+                    mContext.getSystemService(android.content.pm.LauncherApps.class),
+                    new java.util.HashSet<>(), new java.util.HashMap<>(), mApp, model,
+                    new java.util.HashMap<>(), new java.util.HashMap<>(), true,
+                    new com.android.launcher3.widget.WidgetInflater(mContext), mPmHelper,
+                    new java.util.ArrayList<>(), new android.util.LongSparseArray<>(),
+                    new java.util.ArrayList<>()).processItem();
+        }).get();
+        WorkspaceItemInfo item = (WorkspaceItemInfo) model.itemsIdMap.get(73);
+        assertNotNull(item);
+        assertEquals(7, item.screenId);
+        assertEquals(1, item.cellX);
+        assertEquals(2, item.cellY);
+        assertEquals(4, item.rank);
+        assertEquals(original.toUri(0), item.intent.toUri(0));
+        assertEquals("Saved custom label", item.title.toString());
+        assertTrue((item.runtimeStatusFlags & WorkspaceItemInfo.FLAG_DISABLED_NOT_AVAILABLE) != 0);
+    }
+
     @Test
     public void checkItemPlacement_outsideBounds() {
         mIDP.numRows = 4;
