@@ -87,6 +87,7 @@ public final class WorkspaceAvailabilityStore {
 
     /** Only a positive resolution of THIS saved component ends recovery; volume state and time are not inputs. */
     public int evaluate(Row row, boolean exactTargetResolves) {
+        retryPendingWrites();
         if (mRemovals.containsKey(row.fingerprint())) return REMOVE;
         String key = packageKey(row.serial, row.packageName);
         PackageState state = mPackages.get(key);
@@ -99,7 +100,7 @@ public final class WorkspaceAvailabilityStore {
             }
             return AVAILABLE;
         }
-        if (state != null && state.known && !state.external && !state.recovering
+        if (!mWriteFailed && state != null && state.known && !state.external && !state.recovering
                 && !mRecovering.containsKey(row.identity())) return REMOVE;
         if (!mRecovering.containsKey(row.identity())) {
             mRecovering.put(row.identity(), row);
@@ -110,6 +111,7 @@ public final class WorkspaceAvailabilityStore {
 
     /** Call only while ApplicationInfo is accessible. A failed package query must never classify it as internal. */
     public void observe(long serial, String pkg, boolean external, String uuid, String publicUuid) {
+        retryPendingWrites();
         String key = packageKey(serial, pkg);
         PackageState state = mPackages.get(key);
         if (state != null && state.known && state.external == external && Objects.equals(state.uuid, uuid)
@@ -160,7 +162,13 @@ public final class WorkspaceAvailabilityStore {
     }
 
     public List<Row> removals() {
+        retryPendingWrites();
         return new ArrayList<>(mRemovals.values());
+    }
+
+    /** Revalidation can be semantically unchanged after a transient failure; persistence still has unfinished work. */
+    public void retryPendingWrites() {
+        if (mWriteFailed) save();
     }
 
     public void acknowledge(Row row) {
@@ -219,7 +227,7 @@ public final class WorkspaceAvailabilityStore {
             mPersistence.write(bytes.toByteArray());
             mWriteFailed = false;
         } catch (IOException | RuntimeException e) {
-            // Retain the in-memory event for this process and retry on the next mutation. Atomic persistence retains the previous complete snapshot.
+            // Retain the in-memory event and retry even on stable observations/revalidation. Atomic persistence retains the previous complete snapshot.
             mWriteFailed = true;
         }
     }

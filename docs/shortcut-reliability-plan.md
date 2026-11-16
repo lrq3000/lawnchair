@@ -54,3 +54,8 @@ Plan: `C:/git/android-launchers-shortcuts-fix/docs/superpowers/plans/2026-11-16-
 - Deferred minor: the new explanatory string is English-only and uses Android's standard fallback until translations are supplied.
 - Unresolved release gates and missed-uninstall ambiguity are exhaustively listed in `docs/shortcut-reliability-report.md`; no APK, Android compile, device, integration-test, full-suite, or independent-review success is claimed.
 - Final fresh checks: 18/18 host tests, 19/19 base-to-working-tree Java files parsed without syntax diagnostics (not type checked), 2/2 XML documents parsed, and `git diff --check` passed.
+
+## Independent-review correction pass (one pass; no nested review)
+
+- Coordinator reports the original `511824997f84f212ffbb3de9ad6ee222481b24e7` APK and test APK compiled successfully online in 1201 seconds. This is old-commit type-check/build evidence only, not corrected-tip or runtime validation. SystemUI and SDK/build-tools prerequisites are now populated; this worker will not launch a competing/heavy Gradle build.
+- Finding 1 verified: stable evaluate/observe returned before retrying a failed recovery snapshot. Added production-store regressions for writable-again unchanged evaluation, unchanged observation, and conservative decisions while dirty. RED: reopened state returned REMOVE (`Expected 1, got 0`) after writes became writable and evaluation was unchanged. Correction retries dirty snapshots during evaluation/observation/removal replay and foreground revalidation; dirty internal history cannot authorize inferred deletion. GREEN command recorded with the corresponding commit.

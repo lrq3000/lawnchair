@@ -226,6 +226,7 @@ public final class WorkspaceAvailability {
 
     /** Revalidate the existing model objects. Only the storage-related NOT_AVAILABLE bit is changed. */
     public List<WorkspaceItemInfo> revalidate(BgDataModel model) {
+        store().retryPendingWrites();
         List<WorkspaceItemInfo> changed = new ArrayList<>();
         synchronized (model) {
             for (ItemInfo info : model.itemsIdMap) {

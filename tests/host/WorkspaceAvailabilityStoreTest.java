@@ -28,6 +28,9 @@ public final class WorkspaceAvailabilityStoreTest {
         availabilityEventIsDurableWithoutKnownPackage();
         uninstallRetiresRecoveryForPreviouslyDeletedRows();
         longIntentUninstallSurvivesRestart();
+        unchangedRecoveryRetriesTransientWriteFailure();
+        unchangedObservationRetriesTransientWriteFailure();
+        dirtyInternalHistoryCannotAuthorizeDeletion();
         System.out.println("PASS " + count + " production availability policy/store tests");
     }
 
@@ -221,6 +224,44 @@ public final class WorkspaceAvailabilityStoreTest {
         store = new WorkspaceAvailabilityStore(disk);
         equal(WorkspaceAvailabilityStore.REMOVE, store.evaluate(row, true));
         equal(1, store.removals().size());
+        count++;
+    }
+
+    private static void unchangedRecoveryRetriesTransientWriteFailure() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        store.observe(10, "pkg", false, "internal", null);
+        disk.failWrite = true;
+        store.unavailable(10, "pkg");
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        disk.failWrite = false;
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        count++;
+    }
+
+    private static void unchangedObservationRetriesTransientWriteFailure() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        store.observe(10, "pkg", false, "internal", null);
+        disk.failWrite = true;
+        store.unavailable(10, "pkg");
+        store.evaluate(row(1, 10, "Main"), false);
+        disk.failWrite = false;
+        store.observe(10, "pkg", false, "internal", null);
+        store = new WorkspaceAvailabilityStore(disk);
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        count++;
+    }
+
+    private static void dirtyInternalHistoryCannotAuthorizeDeletion() {
+        Disk disk = new Disk();
+        WorkspaceAvailabilityStore store = new WorkspaceAvailabilityStore(disk);
+        disk.failWrite = true;
+        store.observe(10, "pkg", false, "internal", null);
+        equal(WorkspaceAvailabilityStore.KEEP, store.evaluate(row(1, 10, "Main"), false));
+        check(store.hasWriteFailure(), "Still-failing writes must remain visible");
         count++;
     }
 
