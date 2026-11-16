@@ -69,6 +69,14 @@ public class WorkspaceAvailabilityIntegrationTest {
         mContext = new TestContext(InstrumentationRegistry.getInstrumentation().getTargetContext());
         mApp = MAIN_EXECUTOR.submit(() -> LauncherAppState.getInstance(mContext)).get();
         mDb = mApp.getModel().getModelDbController();
+        // A seeded existing layout also has a persisted source grid. DeviceGridState.writeToPrefs intentionally skips sandboxes, so initialize their isolated native keys explicitly.
+        InvariantDeviceProfile idp = mApp.getInvariantDeviceProfile();
+        com.android.launcher3.LauncherPrefs.get(mContext).putSync(
+                com.android.launcher3.LauncherPrefs.WORKSPACE_SIZE.to(idp.numColumns + "," + idp.numRows),
+                com.android.launcher3.LauncherPrefs.HOTSEAT_COUNT.to(idp.numDatabaseHotseatIcons),
+                com.android.launcher3.LauncherPrefs.DEVICE_TYPE.to(idp.deviceType),
+                com.android.launcher3.LauncherPrefs.DB_FILE.to(idp.dbFile));
+        assertFalse(com.android.launcher3.model.GridSizeMigrationUtil.needsToMigrate(mContext, idp));
         mSerial = UserCache.INSTANCE.get(mContext).getSerialNumberForUser(Process.myUserHandle());
         Bitmap icon = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888);
         icon.eraseColor(Color.RED);
@@ -332,6 +340,8 @@ public class WorkspaceAvailabilityIntegrationTest {
         ComponentName component = new ComponentName(pkg, TargetActivity.class.getName());
         Intent original = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(component).putExtra("unchanged", "saved-intent");
+        assertNotNull("The healthy fixture must resolve through the real package manager before cold loading",
+                mContext.getSystemService(LauncherApps.class).resolveActivity(original, Process.myUserHandle()));
         MODEL_EXECUTOR.submit(() -> {
             insert(87, original, Favorites.CONTAINER_DESKTOP, 7, 0, mSerial);
             mDb.clearEmptyDbFlag();

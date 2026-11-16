@@ -45,6 +45,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.plus
 import org.json.JSONArray
@@ -123,7 +124,9 @@ class FontCache private constructor(private val context: Context) : SafeCloseabl
     }
 
     override fun close() {
-        TODO("Not yet implemented")
+        // Cancel this cache's pending loaders without deleting user font files or closing process-owned font providers.
+        scope.cancel()
+        deferredFonts.clear()
     }
 
     class Family(val displayName: String, val variants: Map<String, Font>) {

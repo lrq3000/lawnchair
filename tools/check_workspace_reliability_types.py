@@ -19,11 +19,16 @@ changed = subprocess.check_output([
     "git", "diff", "511824997f84f212ffbb3de9ad6ee222481b24e7", "--name-only",
 ], cwd=ROOT, text=True).splitlines()
 sources = [ROOT / name for name in changed if name.endswith((".java", ".kt")) and not name.startswith("tests/")]
+# Kotlin requires a sealed superclass and its subclasses to be compiled in the same module, even for a focused check.
+if ROOT / "lawnchair/src/app/lawnchair/preferences/PreferenceManager.kt" in sources:
+    sources.append(ROOT / "lawnchair/src/app/lawnchair/preferences/BasePreferenceManager.kt")
+    sources.append(ROOT / "lawnchair/src/app/lawnchair/preferences/PrefEntry.kt")
 if not sources:
     raise SystemExit("No correction sources found")
 
 cached_jars = sorted((CACHE / "modules-2/files-2.1").rglob("*.jar"))
 compiler = next(p for p in cached_jars if "kotlin-compiler-embeddable/2.3.0/" in p.as_posix())
+compose_plugin = next(p for p in cached_jars if "kotlin-compose-compiler-plugin-embeddable/2.3.0/" in p.as_posix())
 compiler_cp = [compiler] + [p for p in cached_jars if p != compiler]
 dependencies = list((CACHE / "9.3.0/transforms").rglob("classes.jar")) + cached_jars
 existing_classes = [
@@ -55,7 +60,7 @@ def invoke(executable, name, arguments):
 invoke(JAVA / "java", "focused-kotlin", [
     "-Xmx1024m", "-cp", os.pathsep.join(map(str, compiler_cp)),
     "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler", "-no-stdlib", "-no-reflect", "-jvm-target", "17",
-    "-Xjvm-default=all", "-classpath", os.pathsep.join(map(str, classpath)), "-d", KOTLIN,
+    "-Xjvm-default=all", "-Xplugin=" + str(compose_plugin), "-classpath", os.pathsep.join(map(str, classpath)), "-d", KOTLIN,
 ] + sources)
 java_sources = [p for p in sources if p.suffix == ".java"]
 invoke(JAVA / "javac", "focused-java", [
